@@ -16,7 +16,6 @@ def get_correlations_by_position(df, target_col='rating', positions=['F', 'M', '
             pos_correlation_map[pos] = "No data found for this position"
             continue
 
-        # 2. Select only numeric columns for correlation
         numeric_df = pos_df.select_dtypes(include=['number'])
         
         # Using Spearman because football stats are often skewed
@@ -26,9 +25,7 @@ def get_correlations_by_position(df, target_col='rating', positions=['F', 'M', '
         
         filtered_corr = correlations[correlations.abs() >= cutoff]
 
-        # Sort by absolute value (highest impact first)
-        sorted_corr = filtered_corr.reindex(filtered_corr.abs().sort_values(ascending=False).index)
-        
+        sorted_corr = filtered_corr.sort_values(key=abs, ascending=False)        
         pos_correlation_map[pos] = sorted_corr.to_dict()
 
     return pos_correlation_map
@@ -36,5 +33,5 @@ def get_correlations_by_position(df, target_col='rating', positions=['F', 'M', '
 
 if __name__ == "__main__":
     data = load_PL_dataset()
-    results = get_correlations_by_position(data)
+    results = get_correlations_by_position(data, positions=['M'])
     print(list(results['M'].items()))
