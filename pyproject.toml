@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "kagglehub>=1.0.0",
+    "pandas>=3.0.2",
     "pyro-ppl>=1.9.1",
     "torch>=2.11.0",
 ]
