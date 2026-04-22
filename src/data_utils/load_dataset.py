@@ -14,4 +14,4 @@ def load_PL_dataset() -> pd.DataFrame:
 if __name__ == "__main__":
     df = load_PL_dataset()
 
-    print(df.head(5))
+    print(df.head(517))
