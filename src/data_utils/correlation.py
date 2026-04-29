@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from src.data_utils.load_dataset import load_PL_dataset
 
-def get_correlations_by_position(df, target_col='rating', positions=['F', 'M', 'D', 'G'], cutoff=0.7):
+def get_correlations_by_position(df, target_col='rating', positions=['F', 'M', 'D', 'G'], cutoff=0.6):
 
     pos_correlation_map = {}
 
@@ -33,5 +33,6 @@ def get_correlations_by_position(df, target_col='rating', positions=['F', 'M', '
 
 if __name__ == "__main__":
     data = load_PL_dataset()
-    results = get_correlations_by_position(data, positions=['M'])
-    print(list(results['M'].items()))
+    results = get_correlations_by_position(data, positions=['F'])
+    print(list(results['F'].items()))
+    print(len(results['F']))
