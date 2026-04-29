@@ -21,7 +21,7 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
     if model_type == ModelType.GOALKEEPER:
         model = goalkeeper_model
         
-        # 1. Define sensible "True" parameters to bury in the fake data
+        # Define sensible "True" parameters to bury in the fake data
         # Weights (can be negative or positive)
         # Sigmas (must be > 0)
         true_params = {
@@ -41,7 +41,7 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             'rating_sigma': torch.tensor(0.2)
         }
         
-        # 2. Map the model's kwargs to the generated sample site names
+        # Map the model's kwargs to the generated sample site names
         obs_mapping = {
             'saves': 'saves',
             'accuratePasses': 'accuratePasses',
