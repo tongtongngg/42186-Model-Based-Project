@@ -95,7 +95,7 @@ def midfielder_model(
         ohp_mu  = torch.exp(log_mu_ohp).expand(n_obs)
         ohp_obs = pyro.sample(
             "opp_half_passes",
-            dist.NegativeBinomial(r_ohp, r_ohp / (r_ohp + ohp_mu)),
+            dist.NegativeBinomial(r_ohp, ohp_mu / (r_ohp + ohp_mu)),
             obs=opp_half_passes,
         )
 
@@ -103,7 +103,7 @@ def midfielder_model(
         shots_mu  = torch.exp(log_mu_shots).expand(n_obs)
         shots_obs = pyro.sample(
             "shots_outside",
-            dist.NegativeBinomial(r_shots, r_shots / (r_shots + shots_mu)),
+            dist.NegativeBinomial(r_shots, shots_mu / (r_shots + shots_mu)),
             obs=shots_outside,
         )
 
@@ -111,7 +111,7 @@ def midfielder_model(
         fouled_mu  = torch.exp(log_mu_fouled).expand(n_obs)
         fouled_obs = pyro.sample(
             "was_fouled",
-            dist.NegativeBinomial(r_fouled, r_fouled / (r_fouled + fouled_mu)),
+            dist.NegativeBinomial(r_fouled, fouled_mu / (r_fouled + fouled_mu)),
             obs=was_fouled,
         )
 
@@ -129,7 +129,7 @@ def midfielder_model(
         goals_mu_val     = torch.exp(goals_log_mu_val)
         goals_obs        = pyro.sample(
             "goals",
-            dist.NegativeBinomial(r_goals, r_goals / (r_goals + goals_mu_val)),
+            dist.NegativeBinomial(r_goals, goals_mu_val / (r_goals + goals_mu_val)),
             obs=goals,
         )
 
