@@ -11,3 +11,7 @@ Use `uv run -m < path >` to run a script. Do not add .py to the end. Here is an 
 
 # Loading the data
 in `src.data_utils.load_dataset`, the function `load_PL_dataset` loads the dataset from kaggle. Add `from data_utils import load_dataset` to the top of scripts to use the function.
+
+# Evaluating performance:
+First implement hardcoded weights of a model and test it in `test_recovery.py`
+Afterwards, run `uv run -m src.models.evaluate_performance <position> --steps 1000` to evcaluate the MSE, MAE and R2 statistics.
