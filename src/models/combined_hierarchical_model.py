@@ -11,27 +11,25 @@ def standardize(tensor):
         return tensor - tensor.mean()
     return (tensor - tensor.mean()) / tensor.std()
 
-def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalkeeper_data=None):
+def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalkeeper_data=None, defender_data=None):
     if attacker_data is None: attacker_data = {}
     if midfielder_data is None: midfielder_data = {}
     if goalkeeper_data is None: goalkeeper_data = {}
+    if defender_data is None: defender_data = {}
     
     n_att = attacker_data.get('n', attacker_data['dw'].shape[0] if 'dw' in attacker_data else 1)
     n_mf = midfielder_data.get('n', midfielder_data['goals'].shape[0] if 'goals' in midfielder_data else 1)
     n_gk = goalkeeper_data.get('n', goalkeeper_data['saves'].shape[0] if 'saves' in goalkeeper_data else 1)
+    n_def = defender_data.get('n', defender_data['touches'].shape[0] if 'touches' in defender_data else 1)
 
     mu_w_goals = pyro.sample("mu_w_goals", dist.Normal(0.0, 1.0))
     sigma_w_goals = pyro.sample("sigma_w_goals", dist.HalfNormal(1.0))
-    
     mu_w_xA = pyro.sample("mu_w_xA", dist.Normal(0.0, 1.0))
     sigma_w_xA = pyro.sample("sigma_w_xA", dist.HalfNormal(1.0))
-    
     mu_w_br = pyro.sample("mu_w_br", dist.Normal(0.0, 1.0))
     sigma_w_br = pyro.sample("sigma_w_br", dist.HalfNormal(1.0))
-    
     mu_alpha_rating = pyro.sample("mu_alpha_rating", dist.Normal(0.0, 1.0))
     sigma_alpha_rating = pyro.sample("sigma_alpha_rating", dist.HalfNormal(1.0))
-    
     mu_rating_sigma = pyro.sample("mu_rating_sigma", dist.LogNormal(0.0, 0.5))
 
     alpha_xa_att = pyro.sample("alpha_xa_att", dist.Normal(0, 1))
@@ -42,7 +40,6 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     sot_sigma_att = pyro.sample("sot_sigma_att", dist.HalfNormal(1))
     alpha_g_att = pyro.sample("alpha_g_att", dist.Normal(0, 1))
     beta_sot_g_att = pyro.sample("beta_sot_g_att", dist.Normal(0, 1))
-
     alpha_rating_att = pyro.sample("alpha_rating_att", dist.Normal(mu_alpha_rating, sigma_alpha_rating))
     w_g_att = pyro.sample("w_g_att", dist.Normal(mu_w_goals, sigma_w_goals))
     w_xa_att = pyro.sample("w_xa_att", dist.Normal(mu_w_xA, sigma_w_xA))
@@ -63,7 +60,6 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     beta_ohp_xA_mf = pyro.sample("beta_ohp_xA_mf", dist.Normal(0.0, 0.1))
     log_mu_goals_mf = pyro.sample("log_mu_goals_mf", dist.Normal(0.6, 1.0))
     beta_shots_goals_mf = pyro.sample("beta_shots_goals_mf", dist.Normal(0.0, 0.1))
-
     alpha_rating_mf = pyro.sample("alpha_rating_mf", dist.Normal(mu_alpha_rating, sigma_alpha_rating))
     w_ohp_mf = pyro.sample("w_ohp_mf", dist.Normal(0.0, 1.0))
     w_shots_mf = pyro.sample("w_shots_mf", dist.Normal(0.0, 1.0))
@@ -77,7 +73,6 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     gp_sigma_gk = pyro.sample("gp_sigma_gk", dist.HalfNormal(1))
     alpha_cs_gk = pyro.sample("alpha_cs_gk", dist.Normal(0, 1))
     beta_gp_cs_gk = pyro.sample("beta_gp_cs_gk", dist.Normal(0, 1))
-
     alpha_rating_gk = pyro.sample("alpha_rating_gk", dist.Normal(mu_alpha_rating, sigma_alpha_rating))
     w_saves_gk = pyro.sample("w_saves_gk", dist.Normal(0, 1))
     w_gp_gk = pyro.sample("w_gp_gk", dist.Normal(0, 1))
@@ -85,6 +80,24 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     w_pass_gk = pyro.sample("w_pass_gk", dist.Normal(0, 1))
     w_br_gk = pyro.sample("w_br_gk", dist.Normal(mu_w_br, sigma_w_br))
     rating_sigma_gk = pyro.sample("rating_sigma_gk", dist.HalfNormal(mu_rating_sigma))
+
+    touches_mu_def = pyro.sample("touches_mu_def", dist.Normal(0, 1))
+    touches_sigma_def = pyro.sample("touches_sigma_def", dist.HalfNormal(1))
+    totalDuelsWon_mu_def = pyro.sample("totalDuelsWon_mu_def", dist.Normal(0, 1))
+    totalDuelsWon_sigma_def = pyro.sample("totalDuelsWon_sigma_def", dist.HalfNormal(1))
+    alpha_passes_def = pyro.sample("alpha_passes_def", dist.Normal(0, 1))
+    w_touches_to_passes_def = pyro.sample("w_touches_to_passes_def", dist.Normal(0, 1))
+    passes_sigma_def = pyro.sample("passes_sigma_def", dist.HalfNormal(1))
+    alpha_clearances_def = pyro.sample("alpha_clearances_def", dist.Normal(0, 1))
+    w_duels_to_clearances_def = pyro.sample("w_duels_to_clearances_def", dist.Normal(0, 1))
+    clearances_sigma_def = pyro.sample("clearances_sigma_def", dist.HalfNormal(1))
+    alpha_cs_def = pyro.sample("alpha_cs_def", dist.Normal(0, 1))
+    w_clearances_to_cs_def = pyro.sample("w_clearances_to_cs_def", dist.Normal(0, 1))
+    alpha_rating_def = pyro.sample("alpha_rating_def", dist.Normal(mu_alpha_rating, sigma_alpha_rating))
+    w_touches_def = pyro.sample("w_touches_def", dist.Normal(0, 1))
+    w_passes_def = pyro.sample("w_passes_def", dist.Normal(0, 1))
+    w_cs_def = pyro.sample("w_cs_def", dist.Normal(0, 1))
+    rating_sigma_def = pyro.sample("rating_sigma_def", dist.HalfNormal(mu_rating_sigma))
 
     with pyro.plate("attacker_data", n_att):
         dw_att = pyro.sample("att_dw", dist.Normal(0, 1), obs=attacker_data.get('dw'))
@@ -126,42 +139,14 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
         rating_mu_gk = (alpha_rating_gk + w_saves_gk * saves_gk + w_gp_gk * gp_gk + w_cs_gk * cs_gk + w_pass_gk * pass_gk + w_br_gk * br_gk)
         pyro.sample("gk_rating", dist.Normal(rating_mu_gk, rating_sigma_gk + 1e-4), obs=goalkeeper_data.get('rating'))
 
-if __name__ == "__main__":
-    df = load_PL_dataset()
-    att_df = df[df['position'].isin(['F', 'FW', 'Attacker'])].copy()
-    att_data = {
-        'dw': standardize(torch.tensor(att_df['groundDuelsWon'].values, dtype=torch.float32)),
-        'br': standardize(torch.tensor(att_df['ballRecovery'].values, dtype=torch.float32)),
-        'kp': standardize(torch.tensor(att_df['keyPasses'].values, dtype=torch.float32)),
-        'xa': standardize(torch.tensor(att_df['expectedAssists'].fillna(0).values, dtype=torch.float32)),
-        'ts': standardize(torch.tensor(att_df['totalShots'].values, dtype=torch.float32)),
-        'sot': standardize(torch.tensor(att_df['shotsOnTarget'].values, dtype=torch.float32)),
-        'rating': standardize(torch.tensor(att_df['rating'].values, dtype=torch.float32)),
-        'g_raw': torch.tensor(att_df['goals'].values, dtype=torch.float32)
-    }
-    mf_df_full = load_midfielder_data(df)
-    mf_df = mf_df_full[mf_df_full['minutesPlayed'] >= 450].dropna()
-    mf_data = {
-        'opp_half_passes': torch.tensor(mf_df['accurateOppositionHalfPasses'].values, dtype=torch.float32),
-        'shots_outside': torch.tensor(mf_df['shotsFromOutsideTheBox'].values, dtype=torch.float32),
-        'was_fouled': torch.tensor(mf_df['wasFouled'].values, dtype=torch.float32),
-        'xA': torch.log1p(torch.tensor(mf_df['expectedAssists'].values, dtype=torch.float32)),
-        'goals': torch.tensor(mf_df['goals'].values, dtype=torch.float32),
-        'rating': standardize(torch.tensor(mf_df['rating'].values, dtype=torch.float32))
-    }
-    gk_df = df[df['position'] == 'G'].copy()
-    gk_data = {
-        'saves': standardize(torch.tensor(gk_df['saves'].values, dtype=torch.float32)),
-        'accuratePasses': standardize(torch.tensor(gk_df['accuratePasses'].values, dtype=torch.float32)),
-        'ballRecovery': standardize(torch.tensor(gk_df['ballRecovery'].values, dtype=torch.float32)),
-        'goalsPrevented': standardize(torch.tensor(gk_df['goalsPrevented'].fillna(0).values, dtype=torch.float32)),
-        'rating': standardize(torch.tensor(gk_df['rating'].values, dtype=torch.float32)),
-        'cleanSheet_raw': torch.tensor(gk_df['cleanSheet'].values, dtype=torch.float32)
-    }
-    print("--- Running Combined Hierarchical Model Prior Predictive Check ---")
-    predictive = Predictive(combined_hierarchical_model, num_samples=1)
-    prior_samples = predictive()
-    for pos, keys in [("Attacker", ["att_g", "att_rating"]), ("Midfielder", ["mf_g", "mf_rating"]), ("Goalkeeper", ["gk_cs", "gk_rating"])]:
-        print(f"\n{pos} Samples:")
-        for k in keys:
-            print(f"  {k}: {prior_samples[k].flatten()[:5]}")
+    with pyro.plate("defender_data", n_def):
+        touches_def = pyro.sample("def_touches", dist.Normal(touches_mu_def, touches_sigma_def), obs=defender_data.get('touches'))
+        duels_def = pyro.sample("def_duels", dist.Normal(totalDuelsWon_mu_def, totalDuelsWon_sigma_def), obs=defender_data.get('totalDuelsWon'))
+        passes_mu_def = alpha_passes_def + w_touches_to_passes_def * touches_def
+        passes_def = pyro.sample("def_passes", dist.Normal(passes_mu_def, passes_sigma_def), obs=defender_data.get('accuratePasses'))
+        clearances_mu_def = alpha_clearances_def + w_duels_to_clearances_def * duels_def
+        clearances_def = pyro.sample("def_clearances", dist.Normal(clearances_mu_def, clearances_sigma_def), obs=defender_data.get('clearances'))
+        cs_rate_def = torch.exp(alpha_cs_def + w_clearances_to_cs_def * clearances_def)
+        cs_def = pyro.sample("def_cs", dist.Poisson(cs_rate_def), obs=defender_data.get('cleanSheet'))
+        rating_mu_def = (alpha_rating_def + w_touches_def * touches_def + w_passes_def * passes_def + w_cs_def * cs_def)
+        pyro.sample("def_rating", dist.Normal(rating_mu_def, rating_sigma_def + 1e-4), obs=defender_data.get('rating'))

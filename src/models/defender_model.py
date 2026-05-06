@@ -103,14 +103,14 @@ def defender_model(
             obs=clearances,
         )
 
-        cleanSheet_logits = (
+        cleanSheet_rate = torch.exp(
             alpha_cleanSheet
             + w_clearances_to_cleanSheet * clearances_obs
         )
 
         cleanSheet_obs = pyro.sample(
             "cleanSheet",
-            dist.Bernoulli(logits=cleanSheet_logits),
+            dist.Poisson(cleanSheet_rate),
             obs=cleanSheet,
         )
 
