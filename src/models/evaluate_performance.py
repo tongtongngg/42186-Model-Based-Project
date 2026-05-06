@@ -12,65 +12,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from src.data_utils import load_PL_dataset
-
-# Import models
-from src.models.attacker_model_basic import forward_model as attacker_model_fn
-from src.models.goalkeeper_model import goalkeeper_model as goalkeeper_model_fn
-from src.models.midfield_model import midfielder_model as midfielder_model_fn
-
-# Configuration for different models
-MODEL_CONFIGS = {
-    "attacker": {
-        "model_fn": attacker_model_fn,
-        "features": ['groundDuelsWon', 'ballRecovery', 'keyPasses', 'expectedAssists', 'totalShots', 'shotsOnTarget', 'goals'],
-        "pos_filter": 'F',
-        "feature_map": {
-            'groundDuelsWon': 'dw',
-            'ballRecovery': 'br',
-            'keyPasses': 'kp',
-            'expectedAssists': 'xa',
-            'totalShots': 'ts',
-            'shotsOnTarget': 'sot',
-            'goals': 'g_raw'
-        },
-        "target": "rating",
-        # attacker_model_basic standardizes these manually or expects them standardized
-        "to_standardize": ['groundDuelsWon', 'ballRecovery', 'keyPasses', 'expectedAssists', 'totalShots', 'shotsOnTarget']
-    },
-    "goalkeeper": {
-        "model_fn": goalkeeper_model_fn,
-        "features": ['saves', 'accuratePasses', 'ballRecovery', 'goalsPrevented', 'cleanSheet'],
-        "pos_filter": 'G',
-        "feature_map": {
-            'saves': 'saves',
-            'accuratePasses': 'accuratePasses',
-            'ballRecovery': 'ballRecovery',
-            'goalsPrevented': 'goalsPrevented',
-            'cleanSheet': 'cleanSheet_raw'
-        },
-        "target": "rating",
-        "to_standardize": ['saves', 'accuratePasses', 'ballRecovery', 'goalsPrevented']
-    },
-    "midfielder": {
-        "model_fn": midfielder_model_fn,
-        "features": ["accurateOppositionHalfPasses", "shotsFromOutsideTheBox", "wasFouled", "expectedAssists", "goals"],
-        "pos_filter": 'M',
-        "feature_map": {
-            'accurateOppositionHalfPasses': 'opp_half_passes',
-            'shotsFromOutsideTheBox': 'shots_outside',
-            'wasFouled': 'was_fouled',
-            'expectedAssists': 'xA',
-            'goals': 'goals'
-        },
-        "target": "rating",
-        "to_standardize": [] 
-    }
-}
+from src.models.config import MODEL_CONFIGS
 
 def get_model_data(df, config, scalers_x=None, scaler_y=None):
-    """
-    Prepares data dictionary for Pyro models based on config.
-    """
     features = config["features"]
     target = config["target"]
     feature_map = config["feature_map"]
@@ -96,7 +40,6 @@ def get_model_data(df, config, scalers_x=None, scaler_y=None):
         else:
             X_dict[arg_name] = torch.tensor(vals.squeeze(), dtype=torch.float32)
             
-    # Target (rating)
     y_vals = data[[target]].values.astype(np.float32)
     if scaler_y is None:
         scaler_y = StandardScaler()
@@ -109,9 +52,6 @@ def get_model_data(df, config, scalers_x=None, scaler_y=None):
     return X_dict, new_scalers_x, scaler_y
 
 def plot_predictions(y_true, y_pred, y_std, model_name):
-    """
-    Plots Predicted vs Actual with uncertainty error bars.
-    """
     plt.figure(figsize=(10, 7))
     plt.errorbar(y_true, y_pred, yerr=y_std, fmt='o', alpha=0.5, label='Preds (Mean ± SD)', capsize=3)
     
@@ -132,82 +72,103 @@ def plot_predictions(y_true, y_pred, y_std, model_name):
     print(f"Evaluation plot saved to {output_plot}")
 
 def run_evaluation(model_name, num_steps=2000, lr=0.01):
-    """
-    Evaluates the specified model and saves performance plots.
-    """
     if model_name not in MODEL_CONFIGS:
         raise ValueError(f"Model '{model_name}' not configured in MODEL_CONFIGS.")
     
     config = MODEL_CONFIGS[model_name]
     model_fn = config["model_fn"]
-    pos_filter = config["pos_filter"]
-    target_key = config["target"]
-
-    print(f"--- Evaluating {model_name.capitalize()} Model ---")
     
     df = load_PL_dataset()
-    pos_df = df[df['position'].str.contains(pos_filter, case=False, na=False)].copy()
-    
-    train_df, test_df = train_test_split(pos_df, test_size=0.2, random_state=42)
-    print(f"Train size: {len(train_df)}, Test size: {len(test_df)}")
 
-    train_data, scalers_x, scaler_y = get_model_data(train_df, config)
-    test_data, _, _ = get_model_data(test_df, config, scalers_x=scalers_x, scaler_y=scaler_y)
+    if config.get("is_combined_all"):
+        train_data = {}
+        test_data_full = {}
+        scalers = {}
+        
+        all_y_true = []
+        all_y_pred = []
+        all_y_std = []
 
-    pyro.clear_param_store()
-    guide = AutoNormal(model_fn)
-    optimizer = Adam({"lr": lr})
-    svi = SVI(model_fn, guide, optimizer, loss=Trace_ELBO())
+        for pos_key, pos_cfg in config["positions"].items():
+            pos_df = df[df['position'].str.contains(pos_cfg['pos_filter'], case=False, na=False)].copy()
+            tr_df, te_df = train_test_split(pos_df, test_size=0.2, random_state=42)
+            
+            tr_data, sx, sy = get_model_data(tr_df, pos_cfg)
+            te_data, _, _ = get_model_data(te_df, pos_cfg, scalers_x=sx, scaler_y=sy)
+            
+            train_data[f"{pos_key}_data"] = tr_data
+            test_data_full[f"{pos_key}_data"] = te_data
+            scalers[pos_key] = {"sx": sx, "sy": sy, "te_len": len(te_df)}
 
-    print(f"Training on {len(train_df)} samples...")
-    for step in range(num_steps):
-        loss = svi.step(**train_data)
-        if step % 500 == 0:
-            print(f"Step {step:4d} : Loss = {loss:.4f}")
+        pyro.clear_param_store()
+        guide = AutoNormal(model_fn)
+        svi = SVI(model_fn, guide, Adam({"lr": lr}), loss=Trace_ELBO())
 
-    print("\nGenerating predictions on test set...")
-    predict_data = {k: v for k, v in test_data.items() if k != target_key}
-    
-    predictive = Predictive(model_fn, guide=guide, num_samples=500)
-    test_samples = predictive(**predict_data)
-    
-    # error handling since we all used different site names for the rating predictions
-    if target_key in test_samples:
-        pred_site = target_key
-    elif 'obs' in test_samples:
-        pred_site = 'obs'
+        for step in range(num_steps):
+            loss = svi.step(**train_data)
+            if step % 500 == 0: print(f"Step {step:4d} : Loss = {loss:.4f}")
+
+        predict_data = {pk: {k: v for k, v in pd_val.items() if k != "rating"} for pk, pd_val in test_data_full.items()}
+        predictive = Predictive(model_fn, guide=guide, num_samples=500)
+        samples = predictive(**predict_data)
+
+        for pos_key, pos_cfg in config["positions"].items():
+            site = pos_cfg["target_site"]
+            y_pred = samples[site].mean(axis=0).detach().numpy()
+            y_std = samples[site].std(axis=0).detach().numpy()
+            y_true = test_data_full[f"{pos_key}_data"]["rating"].detach().numpy()
+            
+            all_y_true.extend(y_true)
+            all_y_pred.extend(y_pred)
+            all_y_std.extend(y_std)
+
+        all_y_true, all_y_pred, all_y_std = np.array(all_y_true), np.array(all_y_pred), np.array(all_y_std)
+        
+        mse = mean_squared_error(all_y_true, all_y_pred)
+        mae = mean_absolute_error(all_y_true, all_y_pred)
+        r2 = r2_score(all_y_true, all_y_pred)
+
+        print(f"\n==============================\n      {model_name.upper()} PERFORMANCE\n==============================\nMSE: {mse:.4f}\nMAE: {mae:.4f}\nR2 : {r2:.4f}\n==============================")
+        plot_predictions(all_y_true, all_y_pred, all_y_std, model_name)
+
     else:
-        # Fallback: look for the one that matches shape
-        possible = [k for k, v in test_samples.items() if v.shape[-1] == len(test_df)]
-        if possible:
-            pred_site = possible[0]
-        else:
-            raise ValueError(f"Could not find rating predictions in samples. Available: {list(test_samples.keys())}")
+        pos_filter = config["pos_filter"]
+        target_key = config["target"]
+        pos_df = df[df['position'].str.contains(pos_filter, case=False, na=False)].copy()
+        train_df, test_df = train_test_split(pos_df, test_size=0.2, random_state=42)
+        
+        train_data, sx, sy = get_model_data(train_df, config)
+        test_data, _, _ = get_model_data(test_df, config, scalers_x=sx, scaler_y=sy)
 
-    y_pred = test_samples[pred_site].mean(axis=0).detach().numpy()
-    y_std = test_samples[pred_site].std(axis=0).detach().numpy()
-    y_true = test_data[target_key].detach().numpy()
+        pyro.clear_param_store()
+        guide = AutoNormal(model_fn)
+        svi = SVI(model_fn, guide, Adam({"lr": lr}), loss=Trace_ELBO())
 
-    mse = mean_squared_error(y_true, y_pred)
-    mae = mean_absolute_error(y_true, y_pred)
-    r2 = r2_score(y_true, y_pred)
+        for step in range(num_steps):
+            loss = svi.step(**train_data)
+            if step % 500 == 0: print(f"Step {step:4d} : Loss = {loss:.4f}")
 
-    print("\n" + "="*30)
-    print(f"      {model_name.upper()} PERFORMANCE")
-    print("="*30)
-    print(f"MSE: {mse:.4f}")
-    print(f"MAE: {mae:.4f}")
-    print(f"R2 : {r2:.4f}")
-    print("="*30)
+        predict_data = {k: v for k, v in test_data.items() if k != target_key}
+        predictive = Predictive(model_fn, guide=guide, num_samples=500)
+        test_samples = predictive(**predict_data)
+        
+        pred_site = target_key if target_key in test_samples else 'obs' if 'obs' in test_samples else [k for k, v in test_samples.items() if v.shape[-1] == len(test_df)][0]
 
-    plot_predictions(y_true, y_pred, y_std, model_name)
+        y_pred = test_samples[pred_site].mean(axis=0).detach().numpy()
+        y_std = test_samples[pred_site].std(axis=0).detach().numpy()
+        y_true = test_data[target_key].detach().numpy()
+
+        mse = mean_squared_error(y_true, y_pred)
+        mae = mean_absolute_error(y_true, y_pred)
+        r2 = r2_score(y_true, y_pred)
+
+        print(f"\n==============================\n      {model_name.upper()} PERFORMANCE\n==============================\nMSE: {mse:.4f}\nMAE: {mae:.4f}\nR2 : {r2:.4f}\n==============================")
+        plot_predictions(y_true, y_pred, y_std, model_name)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate performance of MBML models.")
-    parser.add_argument("model", choices=["attacker", "goalkeeper", "midfielder", "defender", "combined_manual"], help="Name of the model to evaluate.")
+    parser.add_argument("model", choices=list(MODEL_CONFIGS.keys()), help="Name of the model to evaluate.")
     parser.add_argument("--steps", type=int, default=2000, help="Number of SVI steps.")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate.")
-    
     args = parser.parse_args()
-    
     run_evaluation(args.model, num_steps=args.steps, lr=args.lr)
