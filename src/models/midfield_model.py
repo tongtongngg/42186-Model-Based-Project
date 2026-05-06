@@ -40,14 +40,15 @@ def midfielder_model(
     Bayesian PGM for midfielder ratings.
 
     DAG:
-        accurateOppositionHalfPasses (NegBin) --> expectedAssists (Gamma)
+        accurateOppositionHalfPasses (NegBin) --> expectedAssists (Normal, log1p scale)
         shotsFromOutsideTheBox       (NegBin) --> goals            (NegBin)
         wasFouled                    (NegBin)
         all five nodes --> rating (Normal)
 
     Count features use Negative Binomial (overdispersed counts confirmed in analysis).
-    expectedAssists uses Gamma (continuous, right-skewed).
-    Rating regression uses log1p of counts to put all inputs on a comparable scale.
+    expectedAssists is modelled as Normal on the log1p scale — caller passes log1p(xA)
+    so zeros are handled naturally (log1p(0) = 0).
+    Rating regression uses log1p-scaled inputs throughout.
     """
 
     # --- Dispersion parameters (one per NegBin feature) ---
@@ -61,9 +62,9 @@ def midfielder_model(
     log_mu_shots  = pyro.sample("log_mu_shots",  dist.Normal(_LOG_MU_SHOTS,  1.0))
     log_mu_fouled = pyro.sample("log_mu_fouled", dist.Normal(_LOG_MU_FOULED, 1.0))
 
-    # --- Gamma parameters for expectedAssists ---
-    xA_alpha = pyro.sample("xA_alpha", dist.HalfNormal(2.0))
-    xA_beta  = pyro.sample("xA_beta",  dist.HalfNormal(1.0))
+    # --- Normal parameters for log1p(expectedAssists) ---
+    xA_mu_base = pyro.sample("xA_mu_base", dist.Normal(0.0, 1.0))
+    xA_sigma   = pyro.sample("xA_sigma",   dist.HalfNormal(1.0))
 
     # --- Dependency: opp_half_passes --> expectedAssists ---
     beta_ohp_xA = pyro.sample("beta_ohp_xA", dist.Normal(0.0, 0.1))
@@ -114,14 +115,12 @@ def midfielder_model(
             obs=was_fouled,
         )
 
-        # Child: expectedAssists ~ Gamma, depends on opp_half_passes
-        # Normalise ohp by its prior mean so beta_ohp_xA stays on a unit scale
-        xA_concentration = torch.exp(
-            torch.log(xA_alpha + 1e-6) + beta_ohp_xA * ohp_obs / _MEAN_OHP
-        )
+        # Child: log1p(expectedAssists) ~ Normal, depends on opp_half_passes
+        # Caller passes log1p(xA) so zeros are handled (log1p(0) = 0)
+        xA_mu_val = xA_mu_base + beta_ohp_xA * ohp_obs / _MEAN_OHP
         xA_obs = pyro.sample(
             "xA",
-            dist.Gamma(xA_concentration, xA_beta),
+            dist.Normal(xA_mu_val, xA_sigma),
             obs=xA,
         )
 
@@ -160,7 +159,7 @@ if __name__ == "__main__":
         'opp_half_passes': t('accurateOppositionHalfPasses'),
         'shots_outside':   t('shotsFromOutsideTheBox'),
         'was_fouled':      t('wasFouled'),
-        'xA':              t('expectedAssists'),
+        'xA':              torch.log1p(t('expectedAssists')),
         'goals':           t('goals'),
         'rating':          standardize(t('rating')),
     }
