@@ -14,41 +14,104 @@ from sklearn.preprocessing import StandardScaler
 from src.data_utils import load_PL_dataset
 
 # Import models
-from src.models.attacker_model import model as attacker_model_fn
+from src.models.attacker_model_basic import forward_model as attacker_model_fn
+from src.models.goalkeeper_model import goalkeeper_model as goalkeeper_model_fn
+from src.models.midfield_model import midfielder_model as midfielder_model_fn
 
-def preprocess_with_mapping(df, features, target, team_mapping=None, scaler_x=None, scaler_y=None):
+# Configuration for different models
+MODEL_CONFIGS = {
+    "attacker": {
+        "model_fn": attacker_model_fn,
+        "features": ['groundDuelsWon', 'ballRecovery', 'keyPasses', 'expectedAssists', 'totalShots', 'shotsOnTarget', 'goals'],
+        "pos_filter": 'F',
+        "feature_map": {
+            'groundDuelsWon': 'dw',
+            'ballRecovery': 'br',
+            'keyPasses': 'kp',
+            'expectedAssists': 'xa',
+            'totalShots': 'ts',
+            'shotsOnTarget': 'sot',
+            'goals': 'g_raw'
+        },
+        "target": "rating",
+        # attacker_model_basic standardizes these manually or expects them standardized
+        "to_standardize": ['groundDuelsWon', 'ballRecovery', 'keyPasses', 'expectedAssists', 'totalShots', 'shotsOnTarget']
+    },
+    "goalkeeper": {
+        "model_fn": goalkeeper_model_fn,
+        "features": ['saves', 'accuratePasses', 'ballRecovery', 'goalsPrevented', 'cleanSheet'],
+        "pos_filter": 'G',
+        "feature_map": {
+            'saves': 'saves',
+            'accuratePasses': 'accuratePasses',
+            'ballRecovery': 'ballRecovery',
+            'goalsPrevented': 'goalsPrevented',
+            'cleanSheet': 'cleanSheet_raw'
+        },
+        "target": "rating",
+        "to_standardize": ['saves', 'accuratePasses', 'ballRecovery', 'goalsPrevented']
+    },
+    "midfielder": {
+        "model_fn": midfielder_model_fn,
+        "features": ["accurateOppositionHalfPasses", "shotsFromOutsideTheBox", "wasFouled", "expectedAssists", "goals"],
+        "pos_filter": 'M',
+        "feature_map": {
+            'accurateOppositionHalfPasses': 'opp_half_passes',
+            'shotsFromOutsideTheBox': 'shots_outside',
+            'wasFouled': 'was_fouled',
+            'expectedAssists': 'xA',
+            'goals': 'goals'
+        },
+        "target": "rating",
+        "to_standardize": [] 
+    }
+}
+
+def get_model_data(df, config, scalers_x=None, scaler_y=None):
     """
-    Standardizes features and encodes team names consistently.
+    Prepares data dictionary for Pyro models based on config.
     """
+    features = config["features"]
+    target = config["target"]
+    feature_map = config["feature_map"]
+    to_standardize = config.get("to_standardize", [])
+    
     data = df.copy()
     data[features] = data[features].fillna(0)
     
-    if scaler_x is None:
-        scaler_x = StandardScaler()
-        X_scaled = scaler_x.fit_transform(data[features])
-    else:
-        X_scaled = scaler_x.transform(data[features])
+    X_dict = {}
+    new_scalers_x = scalers_x if scalers_x else {}
+    
+    for col in features:
+        arg_name = feature_map[col]
+        vals = data[[col]].values.astype(np.float32)
         
+        if col in to_standardize:
+            if col not in new_scalers_x:
+                new_scalers_x[col] = StandardScaler()
+                vals_proc = new_scalers_x[col].fit_transform(vals)
+            else:
+                vals_proc = new_scalers_x[col].transform(vals)
+            X_dict[arg_name] = torch.tensor(vals_proc.squeeze(), dtype=torch.float32)
+        else:
+            X_dict[arg_name] = torch.tensor(vals.squeeze(), dtype=torch.float32)
+            
+    # Target (rating)
+    y_vals = data[[target]].values.astype(np.float32)
     if scaler_y is None:
         scaler_y = StandardScaler()
-        y_scaled = scaler_y.fit_transform(data[[target]])
+        y_proc = scaler_y.fit_transform(y_vals)
     else:
-        y_scaled = scaler_y.transform(data[[target]])
-
-    X = torch.tensor(X_scaled, dtype=torch.float)
-    y = torch.tensor(y_scaled, dtype=torch.float).squeeze()
-
-    if team_mapping is None:
-        team_names = sorted(data['team_name'].unique())
-        team_mapping = {name: i for i, name in enumerate(team_names)}
+        y_proc = scaler_y.transform(y_vals)
     
-    team_ids = torch.tensor(data['team_name'].map(team_mapping).values, dtype=torch.long)
-    num_teams = len(team_mapping)
-
-    return X, y, team_ids, num_teams, team_mapping, scaler_x, scaler_y
+    X_dict[target] = torch.tensor(y_proc.squeeze(), dtype=torch.float32)
+    
+    return X_dict, new_scalers_x, scaler_y
 
 def plot_predictions(y_true, y_pred, y_std, model_name):
-    # plotting section
+    """
+    Plots Predicted vs Actual with uncertainty error bars.
+    """
     plt.figure(figsize=(10, 7))
     plt.errorbar(y_true, y_pred, yerr=y_std, fmt='o', alpha=0.5, label='Preds (Mean ± SD)', capsize=3)
     
@@ -72,32 +135,24 @@ def run_evaluation(model_name, num_steps=2000, lr=0.01):
     """
     Evaluates the specified model and saves performance plots.
     """
+    if model_name not in MODEL_CONFIGS:
+        raise ValueError(f"Model '{model_name}' not configured in MODEL_CONFIGS.")
+    
+    config = MODEL_CONFIGS[model_name]
+    model_fn = config["model_fn"]
+    pos_filter = config["pos_filter"]
+    target_key = config["target"]
+
     print(f"--- Evaluating {model_name.capitalize()} Model ---")
     
-    # Configuration based on model
-    if model_name == "attacker":
-        model_fn = attacker_model_fn
-        features = ['totalAttemptAssist', 'groundDuelsWon', 'keyPasses', 'goals']
-        pos_filter = 'F'
-    else:
-        raise ValueError(f"Model '{model_name}' evaluation not yet implemented.")
-
-    target = 'rating'
-    
-
     df = load_PL_dataset()
-    pos_df = df[df['position'] == pos_filter].copy()
-    train_df, test_df = train_test_split(pos_df, test_size=0.2, random_state=42)
+    pos_df = df[df['position'].str.contains(pos_filter, case=False, na=False)].copy()
     
+    train_df, test_df = train_test_split(pos_df, test_size=0.2, random_state=42)
     print(f"Train size: {len(train_df)}, Test size: {len(test_df)}")
 
-    X_train, y_train, team_ids_train, num_teams, team_mapping, scaler_x, scaler_y = preprocess_with_mapping(
-        train_df, features, target
-    )
-    X_test, y_test, team_ids_test, _, _, _, _ = preprocess_with_mapping(
-        test_df, features, target, team_mapping=team_mapping, scaler_x=scaler_x, scaler_y=scaler_y
-    )
-    num_features = len(features)
+    train_data, scalers_x, scaler_y = get_model_data(train_df, config)
+    test_data, _, _ = get_model_data(test_df, config, scalers_x=scalers_x, scaler_y=scaler_y)
 
     pyro.clear_param_store()
     guide = AutoNormal(model_fn)
@@ -106,17 +161,32 @@ def run_evaluation(model_name, num_steps=2000, lr=0.01):
 
     print(f"Training on {len(train_df)} samples...")
     for step in range(num_steps):
-        loss = svi.step(team_ids_train, X_train, num_teams, num_features, y_train)
+        loss = svi.step(**train_data)
         if step % 500 == 0:
             print(f"Step {step:4d} : Loss = {loss:.4f}")
 
     print("\nGenerating predictions on test set...")
-    predictive = Predictive(model_fn, guide=guide, num_samples=500)
-    test_samples = predictive(team_ids_test, X_test, num_teams, num_features)
+    predict_data = {k: v for k, v in test_data.items() if k != target_key}
     
-    y_pred = test_samples['obs'].mean(axis=0).detach().numpy()
-    y_std = test_samples['obs'].std(axis=0).detach().numpy()
-    y_true = y_test.detach().numpy()
+    predictive = Predictive(model_fn, guide=guide, num_samples=500)
+    test_samples = predictive(**predict_data)
+    
+    # error handling since we all used different site names for the rating predictions
+    if target_key in test_samples:
+        pred_site = target_key
+    elif 'obs' in test_samples:
+        pred_site = 'obs'
+    else:
+        # Fallback: look for the one that matches shape
+        possible = [k for k, v in test_samples.items() if v.shape[-1] == len(test_df)]
+        if possible:
+            pred_site = possible[0]
+        else:
+            raise ValueError(f"Could not find rating predictions in samples. Available: {list(test_samples.keys())}")
+
+    y_pred = test_samples[pred_site].mean(axis=0).detach().numpy()
+    y_std = test_samples[pred_site].std(axis=0).detach().numpy()
+    y_true = test_data[target_key].detach().numpy()
 
     mse = mean_squared_error(y_true, y_pred)
     mae = mean_absolute_error(y_true, y_pred)
@@ -134,7 +204,7 @@ def run_evaluation(model_name, num_steps=2000, lr=0.01):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate performance of MBML models.")
-    parser.add_argument("model", choices=["attacker"], help="Name of the model to evaluate.")
+    parser.add_argument("model", choices=["attacker", "goalkeeper", "midfielder", "defender", "combined_manual"], help="Name of the model to evaluate.")
     parser.add_argument("--steps", type=int, default=2000, help="Number of SVI steps.")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate.")
     
