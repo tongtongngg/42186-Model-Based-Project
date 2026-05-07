@@ -1,18 +1,15 @@
 import torch
 import pyro
+import pyro.poutine as poutine
 from pyro.infer import SVI, Trace_ELBO, Predictive
 from pyro.infer.autoguide import AutoNormal
 from pyro.optim import Adam
 from src.models.combined_hierarchical_model import combined_hierarchical_model
 
 def test_combined_recovery(num_samples_per_pos=1000, num_steps=3000, lr=0.02):
-    """
-    Parameter recovery test for the Combined Hierarchical Model.
-    """
     pyro.clear_param_store()
     
     true_params = {
-        # global Hyperpriors
         "mu_w_goals": torch.tensor(0.5),
         "sigma_w_goals": torch.tensor(0.2),
         "mu_w_xA": torch.tensor(0.8),
@@ -23,16 +20,25 @@ def test_combined_recovery(num_samples_per_pos=1000, num_steps=3000, lr=0.02):
         "sigma_alpha_rating": torch.tensor(0.5),
         "mu_rating_sigma": torch.tensor(0.2),
         
-        # position-Specific Parameters 
         "w_dw_att": torch.tensor(0.4),
         "w_sot_att": torch.tensor(0.3),
+        
+        "r_ohp_mf": torch.tensor(10.0),
+        "r_shots_mf": torch.tensor(10.0),
+        "r_fouled_mf": torch.tensor(10.0),
+        "r_goals_mf": torch.tensor(5.0),
         "w_ohp_mf": torch.tensor(0.6),
         "w_shots_mf": torch.tensor(0.4),
         "w_fouled_mf": torch.tensor(0.2),
+        
         "w_saves_gk": torch.tensor(0.8),
         "w_gp_gk": torch.tensor(0.5),
         "w_cs_gk": torch.tensor(0.4),
         "w_pass_gk": torch.tensor(0.3),
+
+        "w_touches_def": torch.tensor(0.5),
+        "w_passes_def": torch.tensor(0.4),
+        "w_cs_def": torch.tensor(0.3),
     }
     
     print(f"Generating synthetic data ({num_samples_per_pos} samples per position)...")
@@ -41,22 +47,20 @@ def test_combined_recovery(num_samples_per_pos=1000, num_steps=3000, lr=0.02):
     dummy_data = {
         'attacker_data': {'n': num_samples_per_pos},
         'midfielder_data': {'n': num_samples_per_pos},
-        'goalkeeper_data': {'n': num_samples_per_pos}
+        'goalkeeper_data': {'n': num_samples_per_pos},
+        'defender_data': {'n': num_samples_per_pos}
     }
     
-    # Generate ONE trace with the full plate size
     fake_data = Predictive(conditioned_model, num_samples=1)(**dummy_data)
     
     print("\nSynthetic Data Stats:")
-    for pos_prefix, pos_name in [("att", "Attacker"), ("mf", "Midfielder"), ("gk", "Goalkeeper")]:
+    for pos_prefix, pos_name in [("att", "Attacker"), ("mf", "Midfielder"), ("gk", "Goalkeeper"), ("def", "Defender")]:
         print(f"  {pos_name}:")
         for k in fake_data.keys():
             if k.startswith(pos_prefix):
                 val = fake_data[k].detach()
-                print(f"    {k:<15}: mean={val.mean():.2f}, std={val.std():.2f}, min={val.min():.2f}, max={val.max():.2f}")
+                print(f"    {k:<15}: mean={val.mean():.2f}, std={val.std():.2f}")
 
-    # 3. Prepare kwargs for SVI
-    # Map fake_data (site names) back to the kwargs the model expects
     svi_kwargs = {
         'attacker_data': {
             'dw': fake_data['att_dw'].squeeze(),
@@ -83,12 +87,21 @@ def test_combined_recovery(num_samples_per_pos=1000, num_steps=3000, lr=0.02):
             'goalsPrevented': fake_data['gk_gp'].squeeze(),
             'rating': fake_data['gk_rating'].squeeze(),
             'cleanSheet_raw': fake_data['gk_cs'].squeeze()
+        },
+        'defender_data': {
+            'touches': fake_data['def_touches'].squeeze(),
+            'accuratePasses': fake_data['def_passes'].squeeze(),
+            'totalDuelsWon': fake_data['def_duels'].squeeze(),
+            'clearances': fake_data['def_clearances'].squeeze(),
+            'cleanSheet': fake_data['def_cs'].squeeze(),
+            'rating': fake_data['def_rating'].squeeze()
         }
     }
     
-    # 4. Run SVI
     print(f"Running SVI for {num_steps} steps...")
-    guide = AutoNormal(combined_hierarchical_model)
+    discrete_sites = ["att_g", "mf_ohp", "mf_shots", "mf_fouled", "mf_g", "gk_cs", "def_cs"]
+    blocked_model = poutine.block(combined_hierarchical_model, hide=discrete_sites)
+    guide = AutoNormal(blocked_model)
     optimizer = Adam({"lr": lr})
     svi = SVI(combined_hierarchical_model, guide, optimizer, loss=Trace_ELBO())
     
@@ -97,7 +110,6 @@ def test_combined_recovery(num_samples_per_pos=1000, num_steps=3000, lr=0.02):
         if step % 500 == 0:
             print(f"Step {step:>4} | Loss: {loss:.2f}")
             
-    # 5. Results
     print("\n" + "="*55)
     print("        COMBINED MODEL PARAMETER RECOVERY RESULTS")
     print("="*55)
