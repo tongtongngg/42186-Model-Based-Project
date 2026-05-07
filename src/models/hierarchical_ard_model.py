@@ -34,17 +34,17 @@ def hierarchical_ard_model(X, pos_ids, num_positions, num_features, y=None):
         y: optional float tensor (N,) of standardized ratings
     """
 
-    # ----- ARD: per-feature precision drives irrelevant weights to 0 -----
+    # ----- ARD: sharp Gamma(0.1, 0.1) drives irrelevant feature weights to 0 -----
+    # Per-feature precision tau and per-feature between-position scale, so each
+    # feature can independently be (a) selected/rejected globally and (b) allowed
+    # to vary across positions or pinned to the global mean.
     with pyro.plate("features_ard", num_features):
-        tau = pyro.sample("tau", dist.Gamma(0.5, 0.5))
-        # Clamp away from 0 to keep sigma_feat from exploding numerically
+        tau = pyro.sample("tau", dist.Gamma(0.1, 0.1))
         sigma_feat = 1.0 / torch.sqrt(tau.clamp(min=1e-4))
         mu_beta = pyro.sample("mu_beta", dist.Normal(0.0, sigma_feat))
-
-    # ----- Between-position variation around the (ARD-shrunk) global mean -----
-    # HalfNormal(1.0) lets positions deviate substantially; tighter priors
-    # caused all four positions to collapse onto identical rankings.
-    sigma_pos_beta = pyro.sample("sigma_pos_beta", dist.HalfNormal(1.0))
+        # Per-feature heavy-tailed scale — lets a few features deviate strongly
+        # across positions while the rest stay anchored to mu_beta.
+        sigma_pos_feat = pyro.sample("sigma_pos_feat", dist.HalfCauchy(0.5))
 
     # ----- Intercept hyperpriors -----
     mu_alpha = pyro.sample("mu_alpha", dist.Normal(0.0, 1.0))
@@ -55,7 +55,7 @@ def hierarchical_ard_model(X, pos_ids, num_positions, num_features, y=None):
         alpha_pos = pyro.sample("alpha_pos", dist.Normal(mu_alpha, sigma_alpha))
         beta_pos = pyro.sample(
             "beta_pos",
-            dist.Normal(mu_beta, sigma_pos_beta).to_event(1),
+            dist.Normal(mu_beta, sigma_pos_feat).to_event(1),
         )
 
     # ----- Likelihood -----
@@ -125,9 +125,9 @@ if __name__ == "__main__":
     print("\n--- Training (SVI + AutoNormal) ---")
     pyro.clear_param_store()
     guide = AutoNormal(hierarchical_ard_model)
-    svi = SVI(hierarchical_ard_model, guide, Adam({"lr": 0.01}), loss=Trace_ELBO())
+    svi = SVI(hierarchical_ard_model, guide, Adam({"lr": 0.005}), loss=Trace_ELBO())
 
-    num_steps = 3000
+    num_steps = 5000
     for step in range(num_steps):
         loss = svi.step(X, pos_ids, G, F, y)
         if step % 500 == 0 or step == num_steps - 1:
@@ -137,7 +137,7 @@ if __name__ == "__main__":
     posterior = Predictive(
         hierarchical_ard_model, guide=guide, num_samples=800,
         return_sites=("tau", "mu_beta", "beta_pos", "alpha_pos",
-                      "sigma_pos_beta", "sigma_y"),
+                      "sigma_pos_feat", "sigma_y"),
     )
     samples = posterior(X, pos_ids, G, F)
 
@@ -146,6 +146,9 @@ if __name__ == "__main__":
     mu_beta_mean = samples['mu_beta'].mean(0).detach().numpy()
     beta_pos_mean = samples['beta_pos'].mean(0).detach().numpy()
     alpha_pos_mean = samples['alpha_pos'].mean(0).detach().numpy()
+    sigma_pos_feat_mean = samples['sigma_pos_feat'].mean(0).detach().numpy()
+    # Empirical between-position spread of recovered weights
+    pos_spread = beta_pos_mean.std(axis=0)
 
     feature_names_arr = np.array(feature_names)
 
@@ -160,6 +163,9 @@ if __name__ == "__main__":
 
     print("\n[Global] Top-10 negative global weights mu_beta:")
     _print_top("mu_beta-", mu_beta_mean, feature_names_arr, k=10, reverse=False)
+
+    print("\n[Hierarchy] Top-10 features that vary most across positions (std of beta_pos):")
+    _print_top("pos spread", pos_spread, feature_names_arr, k=10, reverse=True)
 
     print("\n[Hierarchy] Per-position top-5 features by |beta_pos|:")
     for g, pos_label in enumerate(pos_categories):
