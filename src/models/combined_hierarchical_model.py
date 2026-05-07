@@ -22,6 +22,10 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     sigma_w_xA = pyro.sample("sigma_w_xA", dist.HalfNormal(1.0))
     mu_w_br = pyro.sample("mu_w_br", dist.Normal(0.0, 1.0))
     sigma_w_br = pyro.sample("sigma_w_br", dist.HalfNormal(1.0))
+    mu_w_cs = pyro.sample("mu_w_cs", dist.Normal(0.0, 1.0))
+    sigma_w_cs = pyro.sample("sigma_w_cs", dist.HalfNormal(1.0))
+    mu_w_pass = pyro.sample("mu_w_pass", dist.Normal(0.0, 1.0))
+    sigma_w_pass = pyro.sample("sigma_w_pass", dist.HalfNormal(1.0))
     mu_alpha_rating = pyro.sample("mu_alpha_rating", dist.Normal(0.0, 1.0))
     sigma_alpha_rating = pyro.sample("sigma_alpha_rating", dist.HalfNormal(1.0))
     mu_rating_sigma = pyro.sample("mu_rating_sigma", dist.LogNormal(0.0, 0.5))
@@ -73,8 +77,8 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     alpha_rating_gk = pyro.sample("alpha_rating_gk", dist.Normal(mu_alpha_rating, sigma_alpha_rating))
     w_saves_gk = pyro.sample("w_saves_gk", dist.Normal(0, 1))
     w_gp_gk = pyro.sample("w_gp_gk", dist.Normal(0, 1))
-    w_cs_gk = pyro.sample("w_cs_gk", dist.Normal(0, 1))
-    w_pass_gk = pyro.sample("w_pass_gk", dist.Normal(0, 1))
+    w_cs_gk = pyro.sample("w_cs_gk", dist.Normal(mu_w_cs, sigma_w_cs))
+    w_pass_gk = pyro.sample("w_pass_gk", dist.Normal(mu_w_pass, sigma_w_pass))
     w_br_gk = pyro.sample("w_br_gk", dist.Normal(mu_w_br, sigma_w_br))
     rating_sigma_gk = pyro.sample("rating_sigma_gk", dist.HalfNormal(mu_rating_sigma))
 
@@ -93,8 +97,8 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     w_clearances_to_cs_def = pyro.sample("w_clearances_to_cs_def", dist.Normal(0, 1))
     alpha_rating_def = pyro.sample("alpha_rating_def", dist.Normal(mu_alpha_rating, sigma_alpha_rating))
     w_touches_def = pyro.sample("w_touches_def", dist.Normal(0, 1))
-    w_passes_def = pyro.sample("w_passes_def", dist.Normal(0, 1))
-    w_cs_def = pyro.sample("w_cs_def", dist.Normal(0, 1))
+    w_passes_def = pyro.sample("w_passes_def", dist.Normal(mu_w_pass, sigma_w_pass))
+    w_cs_def = pyro.sample("w_cs_def", dist.Normal(mu_w_cs, sigma_w_cs))
     rating_sigma_def = pyro.sample("rating_sigma_def", dist.HalfNormal(mu_rating_sigma))
 
     with pyro.plate("attacker_data", n_att):
