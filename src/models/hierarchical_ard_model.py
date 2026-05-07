@@ -3,7 +3,7 @@ import pyro
 import pyro.distributions as dist
 import pandas as pd
 import numpy as np
-from pyro.infer import SVI, Trace_ELBO, Predictive
+from pyro.infer import SVI, Trace_ELBO
 from pyro.infer.autoguide import AutoNormal
 from pyro.optim import Adam
 
@@ -19,49 +19,34 @@ def standardize(tensor: torch.Tensor) -> torch.Tensor:
 
 
 def hierarchical_ard_model(X, pos_ids, num_positions, num_features, y=None):
-    """
-    Hierarchical Bayesian regression with Automatic Relevance Determination.
-
-    Hierarchy: each position (G/D/M/F) has its own coefficient vector around a
-    shared global mean. ARD per-feature precision shrinks irrelevant feature
-    weights toward zero.
-
-    Args:
-        X: float tensor (N, F) of standardized features
-        pos_ids: long tensor (N,) of position indices in [0, num_positions)
-        num_positions: int (4 for G/D/M/F)
-        num_features: int F
-        y: optional float tensor (N,) of standardized ratings
-    """
-
-    # ----- ARD: sharp Gamma(0.1, 0.1) drives irrelevant feature weights to 0 -----
-    # Per-feature precision tau and per-feature between-position scale, so each
-    # feature can independently be (a) selected/rejected globally and (b) allowed
-    # to vary across positions or pinned to the global mean.
-    with pyro.plate("features_ard", num_features):
-        tau = pyro.sample("tau", dist.Gamma(0.1, 0.1))
-        sigma_feat = 1.0 / torch.sqrt(tau.clamp(min=1e-4))
-        mu_beta = pyro.sample("mu_beta", dist.Normal(0.0, sigma_feat))
-        # Per-feature heavy-tailed scale — lets a few features deviate strongly
-        # across positions while the rest stay anchored to mu_beta.
-        sigma_pos_feat = pyro.sample("sigma_pos_feat", dist.HalfCauchy(0.5))
-
-    # ----- Intercept hyperpriors -----
+    # 1. Global Intercept
     mu_alpha = pyro.sample("mu_alpha", dist.Normal(0.0, 1.0))
     sigma_alpha = pyro.sample("sigma_alpha", dist.HalfNormal(1.0))
 
-    # ----- Position-level partial pooling -----
-    with pyro.plate("positions", num_positions):
+    with pyro.plate("positions_plate", num_positions):
         alpha_pos = pyro.sample("alpha_pos", dist.Normal(mu_alpha, sigma_alpha))
-        beta_pos = pyro.sample(
-            "beta_pos",
-            dist.Normal(mu_beta, sigma_pos_feat).to_event(1),
-        )
 
-    # ----- Likelihood -----
+    with pyro.plate("features", num_features):
+        global_tau = pyro.sample("global_tau", dist.Gamma(0.1, 0.1))
+        global_scale = 1.0 / torch.sqrt(global_tau.clamp(min=1e-4))
+
+        with pyro.plate("pos_ard", num_positions):
+            local_tau = pyro.sample("local_tau", dist.Gamma(0.1, 0.1))
+            local_scale = 1.0 / torch.sqrt(local_tau.clamp(min=1e-4))
+            epsilon = pyro.sample("epsilon", dist.Normal(0.0, 1.0))
+
+    # beta_pos is (G, F): local_scale/epsilon are (G, F), global_scale is (F,) → unsqueeze(0) → (1, F).
+    beta_pos = (global_scale.unsqueeze(0) * local_scale) * epsilon
+
+    # 4. Likelihood
     sigma_y = pyro.sample("sigma_y", dist.HalfNormal(1.0))
+
+    # beta_pos is (G, F). Indexing [pos_ids, :] gives (N, F) directly.
+    current_beta = beta_pos[pos_ids, :]
+    
+    mu = alpha_pos[pos_ids] + (current_beta * X).sum(dim=-1)
+    
     with pyro.plate("data", X.shape[0]):
-        mu = alpha_pos[pos_ids] + (beta_pos[pos_ids] * X).sum(dim=-1)
         pyro.sample("rating", dist.Normal(mu, sigma_y), obs=y)
 
 
@@ -109,70 +94,61 @@ def _print_top(name, values, names, k=10, reverse=True):
 if __name__ == "__main__":
     pyro.set_rng_seed(0)
 
-    print("--- Loading data ---")
+    print("--- Loading & Preprocessing ---")
     df = load_PL_dataset()
     X, y, pos_ids, feature_names, pos_categories = preprocess(df)
     N, F = X.shape
     G = len(pos_categories)
-    print(f"  N={N} players, F={F} features, G={G} positions ({pos_categories})")
-
-    print("\n--- Prior predictive check ---")
-    predictive = Predictive(hierarchical_ard_model, num_samples=1)
-    prior_samples = predictive(X, pos_ids, G, F)
-    sampled_rating = prior_samples['rating'].flatten()[:5]
-    print(f"  First 5 prior-sampled ratings: {sampled_rating.tolist()}")
-
-    print("\n--- Training (SVI + AutoNormal) ---")
-    pyro.clear_param_store()
-    guide = AutoNormal(hierarchical_ard_model)
-    svi = SVI(hierarchical_ard_model, guide, Adam({"lr": 0.005}), loss=Trace_ELBO())
-
-    num_steps = 5000
-    for step in range(num_steps):
-        loss = svi.step(X, pos_ids, G, F, y)
-        if step % 500 == 0 or step == num_steps - 1:
-            print(f"  Step {step:4d} | ELBO loss = {loss:.2f}")
-
-    print("\n--- Posterior summary ---")
-    posterior = Predictive(
-        hierarchical_ard_model, guide=guide, num_samples=800,
-        return_sites=("tau", "mu_beta", "beta_pos", "alpha_pos",
-                      "sigma_pos_feat", "sigma_y"),
-    )
-    samples = posterior(X, pos_ids, G, F)
-
-    tau_mean = samples['tau'].mean(0).detach().numpy()
-    sigma_feat_mean = 1.0 / np.sqrt(np.clip(tau_mean, 1e-6, None))
-    mu_beta_mean = samples['mu_beta'].mean(0).detach().numpy()
-    beta_pos_mean = samples['beta_pos'].mean(0).detach().numpy()
-    alpha_pos_mean = samples['alpha_pos'].mean(0).detach().numpy()
-    sigma_pos_feat_mean = samples['sigma_pos_feat'].mean(0).detach().numpy()
-    # Empirical between-position spread of recovered weights
-    pos_spread = beta_pos_mean.std(axis=0)
-
     feature_names_arr = np.array(feature_names)
 
-    print("\n[ARD] Top-15 features by sigma_feat = 1/sqrt(tau) (kept by ARD):")
-    _print_top("largest sigma_feat", sigma_feat_mean, feature_names_arr, k=15, reverse=True)
+    # 2. Quiet Training
+    pyro.clear_param_store()
+    guide = AutoNormal(hierarchical_ard_model)
+    svi = SVI(hierarchical_ard_model, guide, Adam({"lr": 0.001}), loss=Trace_ELBO())
 
-    print("\n[ARD] Bottom-10 features by sigma_feat (shrunk out by ARD):")
-    _print_top("smallest sigma_feat", sigma_feat_mean, feature_names_arr, k=10, reverse=False)
+    print(f"Training Hierarchical ARD on {N} players...")
+    for step in range(10000):
+        loss = svi.step(X, pos_ids, G, F, y)
+        if step % 2500 == 0:
+            print(f"  Step {step:5d} | ELBO Loss: {loss:.2f}")
 
-    print("\n[Global] Top-10 positive global weights mu_beta:")
-    _print_top("mu_beta+", mu_beta_mean, feature_names_arr, k=10, reverse=True)
+    # 3. Posterior Summary — sample directly from guide to avoid Predictive's nested-plate issues
+    S = 800
+    with torch.no_grad():
+        guide_draws = [guide(X, pos_ids, G, F) for _ in range(S)]
 
-    print("\n[Global] Top-10 negative global weights mu_beta:")
-    _print_top("mu_beta-", mu_beta_mean, feature_names_arr, k=10, reverse=False)
+    global_tau_s = torch.stack([d['global_tau'] for d in guide_draws])  # (S, F)
+    local_tau_s  = torch.stack([d['local_tau']  for d in guide_draws])  # (S, G, F)
+    epsilon_s    = torch.stack([d['epsilon']     for d in guide_draws])  # (S, G, F)
+    alpha_pos_s  = torch.stack([d['alpha_pos']  for d in guide_draws])  # (S, G)
 
-    print("\n[Hierarchy] Top-10 features that vary most across positions (std of beta_pos):")
-    _print_top("pos spread", pos_spread, feature_names_arr, k=10, reverse=True)
+    global_scale_s = 1.0 / torch.sqrt(global_tau_s.clamp(min=1e-4))         # (S, F)
+    local_scale_s  = 1.0 / torch.sqrt(local_tau_s.clamp(min=1e-4))          # (S, G, F)
+    beta_pos_s = global_scale_s.unsqueeze(1) * local_scale_s * epsilon_s    # (S, G, F)
 
-    print("\n[Hierarchy] Per-position top-5 features by |beta_pos|:")
+    global_scale   = global_scale_s.mean(0).numpy()   # (F,)
+    beta_pos_mean  = beta_pos_s.mean(0).numpy()        # (G, F)
+    alpha_pos_mean = alpha_pos_s.mean(0).numpy()       # (G,)
+
+    print("\n" + "="*50)
+    print("STATISTICAL INSIGHTS SUMMARY")
+    print("="*50)
+
+    # Global relevance tells you which stats are important across the board
+    print("\n[GLOBAL ARD] Top 10 metrics across all positions:")
+    _print_top("Metric Importance", global_scale, feature_names_arr, k=10)
+
+    # Position specific drivers
+    print("\n[POSITIONAL ANALYSIS] Key predictive drivers per role:")
     for g, pos_label in enumerate(pos_categories):
-        abs_w = np.abs(beta_pos_mean[g])
-        order = np.argsort(abs_w)[::-1][:5]
-        print(f"  Position {pos_label} (alpha={alpha_pos_mean[g]:+.3f}):")
+        # beta_pos_mean is (G, F); index row for this position
+        pos_weights = beta_pos_mean[g, :]
+        print(f"\n>> {pos_label} (Baseline: {alpha_pos_mean[g]:+.2f})")
+        
+        # Sort by absolute impact
+        order = np.argsort(np.abs(pos_weights))[::-1][:5]
         for i in order:
-            print(f"    {feature_names_arr[i]:<40} {beta_pos_mean[g, i]:+.4f}")
+            print(f"   {pos_weights[i]:+.4f} | {feature_names_arr[i]}")
 
-    print("\nDone.")
+    print("\n" + "="*50)
+    print("Process Complete.")
