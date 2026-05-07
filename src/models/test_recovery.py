@@ -1,9 +1,10 @@
 import torch
 from enum import Enum
-from src.models.defender_model import defender_model
 from src.models.parameter_recovery import run_parameter_recovery
 from src.models.goalkeeper_model import goalkeeper_model
 from src.models.attacker_model import forward_model
+from src.models.defender_model import defender_model
+from src.models.midfield_model import midfielder_model
 
 class ModelType(Enum):
     GOALKEEPER = "goalkeeper"
@@ -21,6 +22,9 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
     if model_type == ModelType.GOALKEEPER:
         model = goalkeeper_model
         
+        # Define sensible "True" parameters to bury in the fake data
+        # Weights (can be negative or positive)
+        # Sigmas (must be > 0)
         true_params = {
             'alpha_gp': torch.tensor(0.0),
             'beta_saves_gp': torch.tensor(0.6),
@@ -38,6 +42,7 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             'rating_sigma': torch.tensor(0.2)
         }
         
+        # Map the model's kwargs to the generated sample site names
         obs_mapping = {
             'saves': 'saves',
             'accuratePasses': 'accuratePasses',
@@ -47,7 +52,7 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             'rating': 'rating'
         }
 
-    elif model_type == ModelType.FORWARD: 
+    elif model_type == ModelType.FORWARD:  # <--- Added Forward Logic
         model = forward_model
         
         true_params = {
@@ -71,6 +76,7 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             'rating_sigma': torch.tensor(0.3)
         }
         
+        # Map kwarg names -> Sample Site names
         obs_mapping = {
             'dw': 'dw',
             'br': 'br',
@@ -78,10 +84,52 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             'xa': 'xa',
             'ts': 'ts',
             'sot': 'sot',
-            'g_raw': 'g',  
+            'g_raw': 'g',  # Maps 'g_raw' argument to the 'g' Poisson site
             'rating': 'rating'
         }
         
+    elif model_type == ModelType.MIDFIELDER:
+        model = midfielder_model
+
+        true_params = {
+            # NegBin dispersion
+            'r_ohp':    torch.tensor(5.0),
+            'r_shots':  torch.tensor(3.0),
+            'r_fouled': torch.tensor(3.0),
+            'r_goals':  torch.tensor(2.0),
+
+            'log_mu_ohp':    torch.tensor(5.5),
+            'log_mu_shots':  torch.tensor(2.0),
+            'log_mu_fouled': torch.tensor(2.7),
+
+            # expectedAssists (log1p scale)
+            'xA_mu_base': torch.tensor(0.3),
+            'xA_sigma':   torch.tensor(0.5),
+            'beta_ohp_xA': torch.tensor(0.08),
+
+            # goals log-mean and shots dependency
+            'log_mu_goals':     torch.tensor(0.6),
+            'beta_shots_goals': torch.tensor(0.2),
+
+            # rating regression
+            'alpha_rating': torch.tensor(0.0),
+            'w_ohp':        torch.tensor(0.45),
+            'w_shots':      torch.tensor(0.23),
+            'w_fouled':     torch.tensor(0.18),
+            'w_xA':         torch.tensor(0.37),
+            'w_goals':      torch.tensor(0.14),
+            'rating_sigma': torch.tensor(0.3),
+        }
+
+        obs_mapping = {
+            'opp_half_passes': 'opp_half_passes',
+            'shots_outside':   'shots_outside',
+            'was_fouled':      'was_fouled',
+            'xA':              'xA',
+            'goals':           'goals',
+            'rating':          'rating',
+        }
+
     elif model_type == ModelType.DEFENDER:
         model = defender_model
 
@@ -125,6 +173,7 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             "rating": "rating",
         }
 
+    # 3. Run the recovery!
     run_parameter_recovery(
         model=model,
         true_params=true_params,
@@ -135,4 +184,5 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
     )
 
 if __name__ == "__main__":
-    test_model_recovery(ModelType.DEFENDER, num_samples=2000, num_steps=3000)
+    # Test the Goalkeeper model
+    test_model_recovery(ModelType.MIDFIELDER, num_samples=2000, num_steps=3000)
