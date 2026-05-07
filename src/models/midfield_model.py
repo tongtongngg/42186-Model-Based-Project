@@ -2,9 +2,9 @@ import torch
 import pyro
 import pyro.distributions as dist
 from pyro.infer import Predictive
-import pandas as pd
 from src.data_utils import load_PL_dataset
 from src.data_utils.midfield_pre import load_midfielder_data
+from src.data_utils.helpers import standardize
 
 FEATURES = [
     'accurateOppositionHalfPasses',
@@ -13,7 +13,6 @@ FEATURES = [
     'expectedAssists',
     'goals',
 ]
-MIN_MINUTES = 450
 
 # Approximate observed log-means used to centre priors (from midfield_analysis.py output)
 _LOG_MU_OHP    = 5.5   # log(258)
@@ -22,10 +21,6 @@ _LOG_MU_FOULED = 2.7   # log(15)
 _LOG_MU_GOALS  = 0.6   # log(1.8)
 _MEAN_OHP      = 258.0
 _MEAN_SHOTS    = 7.5
-
-
-def standardize(tensor: torch.Tensor) -> torch.Tensor:
-    return (tensor - tensor.mean()) / tensor.std()
 
 
 def midfielder_model(
@@ -82,16 +77,16 @@ def midfielder_model(
     w_goals      = pyro.sample("w_goals",      dist.Normal(0.0, 1.0))
     rating_sigma = pyro.sample("rating_sigma", dist.HalfNormal(1.0))
 
-    # --- Determine batch size ---
     n_obs = 1
     if goals is not None:
         n_obs = goals.shape[0]
     elif rating is not None:
         n_obs = rating.shape[0]
 
+    # plate for iid observations
     with pyro.plate("data", n_obs):
 
-        # Root: accurateOppositionHalfPasses ~ NegBin
+        # accurateOppositionHalfPasses ~ NegBin
         ohp_mu  = torch.exp(log_mu_ohp).expand(n_obs)
         ohp_obs = pyro.sample(
             "opp_half_passes",
@@ -99,7 +94,7 @@ def midfielder_model(
             obs=opp_half_passes,
         )
 
-        # Root: shotsFromOutsideTheBox ~ NegBin
+        # shotsFromOutsideTheBox ~ NegBin
         shots_mu  = torch.exp(log_mu_shots).expand(n_obs)
         shots_obs = pyro.sample(
             "shots_outside",
@@ -107,7 +102,7 @@ def midfielder_model(
             obs=shots_outside,
         )
 
-        # Root: wasFouled ~ NegBin
+        # wasFouled ~ NegBin
         fouled_mu  = torch.exp(log_mu_fouled).expand(n_obs)
         fouled_obs = pyro.sample(
             "was_fouled",
@@ -115,8 +110,7 @@ def midfielder_model(
             obs=was_fouled,
         )
 
-        # Child: log1p(expectedAssists) ~ Normal, depends on opp_half_passes
-        # Caller passes log1p(xA) so zeros are handled (log1p(0) = 0)
+        # log1p(expectedAssists) ~ Normal, depends on opp_half_passes
         xA_mu_val = xA_mu_base + beta_ohp_xA * ohp_obs / _MEAN_OHP
         xA_obs = pyro.sample(
             "xA",
@@ -124,7 +118,7 @@ def midfielder_model(
             obs=xA,
         )
 
-        # Child: goals ~ NegBin, depends on shots_outside
+        # goals ~ NegBin, depends on shots_outside
         goals_log_mu_val = log_mu_goals + beta_shots_goals * shots_obs / _MEAN_SHOTS
         goals_mu_val     = torch.exp(goals_log_mu_val)
         goals_obs        = pyro.sample(
@@ -133,7 +127,7 @@ def midfielder_model(
             obs=goals,
         )
 
-        # Rating: Normal with log1p-scaled count inputs
+        # rating depends on all other features.
         rating_mu = (
             alpha_rating
             + w_ohp    * torch.log1p(ohp_obs)
@@ -149,11 +143,8 @@ if __name__ == "__main__":
     df    = load_PL_dataset()
     mf_df = load_midfielder_data(df)
 
-    sub = mf_df[mf_df['minutesPlayed'] >= MIN_MINUTES][FEATURES + ['rating']].dropna()
-    print(f"\nMidfielders after >={MIN_MINUTES} min filter: {len(sub)} players")
-
     def t(col):
-        return torch.tensor(sub[col].values, dtype=torch.float32)
+        return torch.tensor(mf_df[col].values, dtype=torch.float32)
 
     data = {
         'opp_half_passes': t('accurateOppositionHalfPasses'),
@@ -164,7 +155,6 @@ if __name__ == "__main__":
         'rating':          standardize(t('rating')),
     }
 
-    print("\n--- Ancestral Sampling (Prior Predictive Check) ---")
     predictive    = Predictive(midfielder_model, num_samples=1)
     prior_samples = predictive()
 
@@ -172,5 +162,3 @@ if __name__ == "__main__":
     for k in ['opp_half_passes', 'shots_outside', 'was_fouled', 'xA', 'goals', 'rating']:
         vals = prior_samples[k].flatten()[:5]
         print(f"  {k:<25}: {vals.tolist()}")
-
-    print("\nMidfielder PGM is set up and ready for inference.")

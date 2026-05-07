@@ -1,4 +1,3 @@
-import torch
 import pyro
 import pyro.poutine as poutine
 from pyro.infer import SVI, Trace_ELBO, Predictive
@@ -31,11 +30,9 @@ def run_parameter_recovery(model, true_params: dict, obs_mapping: dict,
     # randomly sample anything that's not fixed.
     predictive = Predictive(conditioned_model, num_samples=num_samples)
     
-    # We call predictive with no arguments to generate pure fake data
     fake_data_traces = predictive()
 
-    # The model function expects specific kwargs (like cleanSheet_raw). 
-    # We map the generated site names to these kwargs.
+    # fake kwargs such that model runs.
     fake_kwargs = {}
     for arg_name, site_name in obs_mapping.items():
         if site_name in fake_data_traces:
@@ -48,7 +45,6 @@ def run_parameter_recovery(model, true_params: dict, obs_mapping: dict,
     optimizer = Adam({"lr": lr})
     svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
 
-    # Attempt to recover parameters
     print(f"\nRunning SVI for {num_steps} steps to recover parameters...")
     for step in range(num_steps):
         loss = svi.step(**fake_kwargs)
@@ -62,7 +58,6 @@ def run_parameter_recovery(model, true_params: dict, obs_mapping: dict,
     print(f"{'Parameter':<15} | {'True':>7} | {'Inferred':>8} | {'Error':>6}")
     print("-" * 45)
     
-    # Extract the median of the learned posterior distributions
     inferred_medians = guide.median()
 
     for param_name, true_tensor in true_params.items():

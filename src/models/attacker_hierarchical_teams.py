@@ -1,4 +1,4 @@
-from src.data_utils import get_correlations_by_position, load_PL_dataset
+from src.data_utils import load_PL_dataset
 import pandas as pd
 import torch
 import pyro
@@ -8,16 +8,15 @@ from pyro.infer.autoguide import AutoNormal
 from pyro.optim import Adam
 from sklearn.preprocessing import StandardScaler
 
-def model(team_ids, X, num_teams, num_features, y=None):
+def HierarchicalTeamsModel(team_ids, X, num_teams, num_features, y=None):
     """
-    Hierarchical Probabilistic Graphical Model.
-    Note: num_teams and num_features are passed explicitly to avoid global variables.
+    This model was an experimental attempt to incorporate team-level effects into the attacker model using hierarchical modeling.
     """
-    # Global Hyper-priors (The League-wide Average)
+    # Global Hyper-priors
     mu_beta = pyro.sample("mu_beta", dist.Normal(torch.zeros(num_features), 1.0).to_event(1))
     sigma_beta = pyro.sample("sigma_beta", dist.HalfNormal(torch.ones(num_features)).to_event(1))
     
-    # Global Intercept (Base rating across the league)
+    # Global Intercept
     mu_alpha = pyro.sample("mu_alpha", dist.Normal(0., 1.))
     sigma_alpha = pyro.sample("sigma_alpha", dist.HalfNormal(1.))
 
@@ -30,7 +29,6 @@ def model(team_ids, X, num_teams, num_features, y=None):
     with pyro.plate("data", X.shape[0]):
         linear_combination = (team_betas[team_ids] * X).sum(dim=-1) + team_alphas[team_ids]
         
-        # Likelihood
         pyro.sample("obs", dist.Normal(linear_combination, 0.1), obs=y)
 
 
@@ -48,7 +46,6 @@ def preprocess_data(df, features, target):
     X = torch.tensor(scaler_x.fit_transform(attackers[features]), dtype=torch.float)
     y = torch.tensor(scaler_y.fit_transform(attackers[[target]]), dtype=torch.float).squeeze()
 
-    # Team encoding for hierarchy
     attackers['team_id'] = attackers['team_name'].astype('category').cat.codes
     team_ids = torch.tensor(attackers['team_id'].values, dtype=torch.long)
     
@@ -80,31 +77,21 @@ def train_model(model_fn, guide_fn, team_ids, X, num_teams, num_features, y, num
 
 
 if __name__ == "__main__":
-    # 1. Configuration & Data Loading
     features = ['totalAttemptAssist', 'groundDuelsWon', 'keyPasses', 'goals']
     target = 'rating'
     num_features = len(features)
     
     df = load_PL_dataset()
-
-    # 2. Preprocessing
     X, y, team_ids, num_teams, team_names = preprocess_data(df, features, target)
 
-    # 3. Setup Guide & Train
-    guide = AutoNormal(model) 
-    train_model(model, guide, team_ids, X, num_teams, num_features, y, num_steps=2000)
+    guide = AutoNormal(HierarchicalTeamsModel) 
+    train_model(HierarchicalTeamsModel, guide, team_ids, X, num_teams, num_features, y, num_steps=2000)
 
-    # 4. Result Extraction
-    predictive = Predictive(model, guide=guide, num_samples=800)
-
+    predictive = Predictive(HierarchicalTeamsModel, guide=guide, num_samples=800)
     samples = predictive(team_ids, X, num_teams, num_features)
-
-    # Get the average team-specific weights
     team_weights = samples['team_betas'].mean(axis=0)
 
-    # Display findings for the first feature
     print(f"\nTop 3 Teams where '{features[0]}' matters MOST for Rating:")
     
-    # Detach from computation graph before converting to numpy
     weights_df = pd.DataFrame(team_weights.detach().numpy(), index=team_names, columns=features)
     print(weights_df[features[0]].sort_values(ascending=False).head(3))

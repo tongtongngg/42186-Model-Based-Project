@@ -1,9 +1,12 @@
 import pyro.poutine as poutine
-from src.models.attacker_model_basic import forward_model as attacker_model_fn
+from src.models.attacker_model import forward_model as attacker_model_fn
 from src.models.goalkeeper_model import goalkeeper_model as goalkeeper_model_fn
 from src.models.midfield_model import midfielder_model as midfielder_model_fn
 from src.models.defender_model import defender_model as defender_model_fn
 from src.models.combined_hierarchical_model import combined_hierarchical_model
+
+"""This file contains configurations for models, as we wrote them individually. 
+It standardizes for evaluate_performance.py, such that it can easily be called from the command-line for all models."""
 
 def combined_attacker_wrapper(**kwargs):
     hidden = [

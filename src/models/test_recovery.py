@@ -3,9 +3,7 @@ from enum import Enum
 from src.models.defender_model import defender_model
 from src.models.parameter_recovery import run_parameter_recovery
 from src.models.goalkeeper_model import goalkeeper_model
-from src.models.attacker_model_basic import forward_model
-# Import other models here as they are created
-# from src.models.defender_model import defender_model
+from src.models.attacker_model import forward_model
 
 class ModelType(Enum):
     GOALKEEPER = "goalkeeper"
@@ -23,9 +21,6 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
     if model_type == ModelType.GOALKEEPER:
         model = goalkeeper_model
         
-        # Define sensible "True" parameters to bury in the fake data
-        # Weights (can be negative or positive)
-        # Sigmas (must be > 0)
         true_params = {
             'alpha_gp': torch.tensor(0.0),
             'beta_saves_gp': torch.tensor(0.6),
@@ -43,7 +38,6 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             'rating_sigma': torch.tensor(0.2)
         }
         
-        # Map the model's kwargs to the generated sample site names
         obs_mapping = {
             'saves': 'saves',
             'accuratePasses': 'accuratePasses',
@@ -53,7 +47,7 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             'rating': 'rating'
         }
 
-    elif model_type == ModelType.FORWARD:  # <--- Added Forward Logic
+    elif model_type == ModelType.FORWARD: 
         model = forward_model
         
         true_params = {
@@ -77,7 +71,6 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             'rating_sigma': torch.tensor(0.3)
         }
         
-        # Map kwarg names -> Sample Site names
         obs_mapping = {
             'dw': 'dw',
             'br': 'br',
@@ -85,7 +78,7 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             'xa': 'xa',
             'ts': 'ts',
             'sot': 'sot',
-            'g_raw': 'g',  # Maps 'g_raw' argument to the 'g' Poisson site
+            'g_raw': 'g',  
             'rating': 'rating'
         }
         
@@ -132,7 +125,6 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
             "rating": "rating",
         }
 
-    # 3. Run the recovery!
     run_parameter_recovery(
         model=model,
         true_params=true_params,
@@ -143,5 +135,4 @@ def test_model_recovery(model_type: ModelType, num_samples=2000, num_steps=2000,
     )
 
 if __name__ == "__main__":
-    # Test the Goalkeeper model
     test_model_recovery(ModelType.DEFENDER, num_samples=2000, num_steps=3000)

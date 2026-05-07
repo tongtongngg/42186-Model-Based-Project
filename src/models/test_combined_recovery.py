@@ -11,9 +11,8 @@ def test_combined_recovery(num_samples_per_pos=1000, num_steps=3000, lr=0.02):
     """
     pyro.clear_param_store()
     
-    # 1. Define "True" Parameters
     true_params = {
-        # Global Hyperpriors
+        # global Hyperpriors
         "mu_w_goals": torch.tensor(0.5),
         "sigma_w_goals": torch.tensor(0.2),
         "mu_w_xA": torch.tensor(0.8),
@@ -24,7 +23,7 @@ def test_combined_recovery(num_samples_per_pos=1000, num_steps=3000, lr=0.02):
         "sigma_alpha_rating": torch.tensor(0.5),
         "mu_rating_sigma": torch.tensor(0.2),
         
-        # Position-Specific Parameters (we'll fix some of these too)
+        # position-Specific Parameters 
         "w_dw_att": torch.tensor(0.4),
         "w_sot_att": torch.tensor(0.3),
         "w_ohp_mf": torch.tensor(0.6),
@@ -36,21 +35,9 @@ def test_combined_recovery(num_samples_per_pos=1000, num_steps=3000, lr=0.02):
         "w_pass_gk": torch.tensor(0.3),
     }
     
-    # 2. Generate Synthetic Data
     print(f"Generating synthetic data ({num_samples_per_pos} samples per position)...")
-    # Condition the model on the true parameters
     conditioned_model = pyro.condition(combined_hierarchical_model, data=true_params)
     
-    # We need to pass dummy data structure to Predictive so it knows the plate sizes
-    # but we want it to sample the features too.
-    # The current combined_hierarchical_model samples root nodes if no obs is provided.
-    predictive = Predictive(conditioned_model, num_samples=1)
-    
-    # To get multiple samples in the plate, we can either call Predictive once with dummy data
-    # or modify the model to take n_obs. 
-    # Current model uses: n_att = attacker_data['dw'].shape[0] if attacker_data else 1
-    # So we pass dummy tensors of the right shape.
-    # dummy_data now only specifies 'n' to trigger sampling of root nodes
     dummy_data = {
         'attacker_data': {'n': num_samples_per_pos},
         'midfielder_data': {'n': num_samples_per_pos},

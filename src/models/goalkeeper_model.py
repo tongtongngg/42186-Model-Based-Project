@@ -2,12 +2,10 @@ import torch
 import pyro
 import pyro.distributions as dist
 from pyro.infer import Predictive
-import pandas as pd
-from src.data_utils import load_PL_dataset
 
-def standardize(tensor):
-    """Standardizes a tensor to have mean 0 and standard deviation 1."""
-    return (tensor - tensor.mean()) / tensor.std()
+from src.data_utils import load_PL_dataset
+from src.data_utils.helpers import standardize
+
 
 def goalkeeper_model(saves=None, accuratePasses=None, ballRecovery=None, 
                      goalsPrevented=None, cleanSheet_raw=None, rating=None):
@@ -32,14 +30,13 @@ def goalkeeper_model(saves=None, accuratePasses=None, ballRecovery=None,
     w_recov = pyro.sample("w_recov", dist.Normal(0, 1))
     rating_sigma = pyro.sample("rating_sigma", dist.HalfNormal(1))
 
-    # Determine batch size
     n_obs = 1
     if saves is not None:
         n_obs = saves.shape[0]
     elif rating is not None:
         n_obs = rating.shape[0]
 
-    # Use a plate to indicate conditionally independent observations
+    # plate to indicate conditionally independent observations
     with pyro.plate("data", n_obs):
         # Standardized priors centered around 0
         saves_obs = pyro.sample("saves", dist.Normal(0, 1), obs=saves)
@@ -83,17 +80,13 @@ if __name__ == "__main__":
     # Keep cleanSheet raw (not standardized) for the Poisson distribution
     cleanSheet_raw = torch.tensor(gk_df['cleanSheet'].values, dtype=torch.float32)
 
-    # Standardize Continuous Data
     std_data = {k: standardize(v) for k, v in data.items()}
     std_data['cleanSheet_raw'] = cleanSheet_raw
 
-    print("--- Ancestral Sampling (Prior Predictive Checks) ---")
-    # Pass the dictionary of tensors (without observations) to check the priors
     predictive = Predictive(goalkeeper_model, num_samples=1)
     prior_samples = predictive()
 
-    print("Generated 1 sample of fake data from the DAG priors:")
-    for k in ['saves', 'goalsPrevented', 'cleanSheet', 'rating']:
-        print(f"Sampled {k}: {prior_samples[k].flatten()[:5]}...") 
 
-    print("\nThe hybrid continuous/discrete PGM is setup and ready for inference!")
+    print("Generated 1 sample of fake data from the priors:")
+    for k in ['saves', 'accuratePasses', 'ballRecovery', 'goalsPrevented', 'rating']:
+        print(f"Sampled {k}: {prior_samples[k].flatten()[:5]}") 

@@ -2,12 +2,10 @@ import torch
 import pyro
 import pyro.distributions as dist
 from pyro.infer import Predictive
-import pandas as pd
-from src.data_utils import load_PL_dataset
 
-def standardize(tensor):
-    """Standardizes a tensor to have mean 0 and standard deviation 1."""
-    return (tensor - tensor.mean()) / tensor.std()
+from src.data_utils import load_PL_dataset
+from src.data_utils.helpers import standardize
+
 
 def forward_model(dw=None, br=None, kp=None, xa=None, ts=None, sot=None, g_raw=None, rating=None):
     """
@@ -39,26 +37,25 @@ def forward_model(dw=None, br=None, kp=None, xa=None, ts=None, sot=None, g_raw=N
     w_sot = pyro.sample("w_sot", dist.Normal(0, 1))
     rating_sigma = pyro.sample("rating_sigma", dist.HalfNormal(1))
 
-    # Determine batch size
     n_obs = 1
     if dw is not None:
         n_obs = dw.shape[0]
     elif rating is not None:
         n_obs = rating.shape[0]
 
-    # Use a plate to indicate conditionally independent observations
+    # Plate to indicate conditionally independent observations
     with pyro.plate("data", n_obs):
-        # 1. Independent Root Nodes (Standardized priors centered around 0)
+
         dw_obs = pyro.sample("dw", dist.Normal(0, 1), obs=dw)
         br_obs = pyro.sample("br", dist.Normal(0, 1), obs=br)
         kp_obs = pyro.sample("kp", dist.Normal(0, 1), obs=kp)
         ts_obs = pyro.sample("ts", dist.Normal(0, 1), obs=ts)
 
-        # 2. Creativity Hierarchy
+        # Creativity Hierarchy
         xa_mu = alpha_xa + beta_kp_xa * kp_obs
         xa_obs = pyro.sample("xa", dist.Normal(xa_mu, xa_sigma), obs=xa)
 
-        # 3. Goal Threat Hierarchy
+        # Goal Threat Hierarchy
         sot_mu = alpha_sot + beta_ts_sot * ts_obs
         sot_obs = pyro.sample("sot", dist.Normal(sot_mu, sot_sigma), obs=sot)
 
@@ -66,7 +63,7 @@ def forward_model(dw=None, br=None, kp=None, xa=None, ts=None, sot=None, g_raw=N
         g_log_rate = alpha_g + beta_sot_g * sot_obs
         g_obs = pyro.sample("g", dist.Poisson(torch.exp(g_log_rate)), obs=g_raw)
 
-        # 4. Final Rating Combination
+        # Rating combination
         rating_mu = (alpha_rating + 
                      w_g * g_obs + 
                      w_xa * xa_obs + 
@@ -80,10 +77,7 @@ def forward_model(dw=None, br=None, kp=None, xa=None, ts=None, sot=None, g_raw=N
 
 if __name__ == "__main__":
     df = load_PL_dataset()
-    # Assuming 'F' or 'FW' is the label for Forwards in your dataset
-    fwd_df = df[df['position'].isin(['F', 'FW', 'Attacker'])].copy()
-    
-    # Handle potential nulls just in case
+    fwd_df = df[df['position'].isin(['F'])].copy()
     fwd_df['expectedAssists'] = fwd_df['expectedAssists'].fillna(0)
 
     data = {
@@ -96,19 +90,15 @@ if __name__ == "__main__":
         'rating': torch.tensor(fwd_df['rating'].values, dtype=torch.float32)
     }
     
-    # Keep goals raw (not standardized) for the Poisson distribution
+    # We keep goals raw (not standardized) for the Poisson distribution
     g_raw = torch.tensor(fwd_df['goals'].values, dtype=torch.float32)
 
-    # Standardize Continuous Data
     std_data = {k: standardize(v) for k, v in data.items()}
     std_data['g_raw'] = g_raw
 
-    print("--- Ancestral Sampling (Prior Predictive Checks) ---")
     predictive = Predictive(forward_model, num_samples=1)
     prior_samples = predictive()
 
-    print("Generated 1 sample of fake data from the DAG priors:")
+    print("Generated 1 sample of fake data from the priors:")
     for k in ['dw', 'xa', 'sot', 'g', 'rating']:
-        print(f"Sampled {k}: {prior_samples[k].flatten()[:5]}...") 
-
-    print("\nThe hybrid continuous/discrete PGM for Forwards is setup and ready for inference!")
+        print(f"Sampled {k}: {prior_samples[k].flatten()[:5]}") 

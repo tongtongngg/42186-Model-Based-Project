@@ -6,6 +6,16 @@ from scipy import stats
 from src.data_utils.load_dataset import load_PL_dataset
 from src.data_utils.midfield_pre import load_midfielder_data
 
+"""Exploratory Data Analysis for Midfielders:
+- Summary stats (mean, var, skew, kurtosis)
+- Normality tests (Shapiro-Wilk & Anderson-Darling)
+- Poisson goodness-of-fit for count features
+- Histograms with fitted Normal/Gamma/Poisson curves
+- Q-Q plots for Normality
+- Violin plots of z-scored features for distribution shape comparison
+
+Developed with the help of Claude."""
+
 FEATURES = [
     'goals',
     'aerialDuelsWon',

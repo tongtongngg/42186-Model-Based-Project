@@ -3,7 +3,6 @@ import argparse
 import torch
 import pyro
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 from pyro.infer import SVI, Trace_ELBO, Predictive
 from pyro.infer.autoguide import AutoNormal
@@ -15,6 +14,7 @@ from src.data_utils import load_PL_dataset
 from src.models.config import MODEL_CONFIGS
 
 def get_model_data(df, config, scalers_x=None, scaler_y=None):
+    """General preprocessing function to prepare data correctly for all models."""
     features = config["features"]
     target = config["target"]
     feature_map = config["feature_map"]
@@ -52,6 +52,8 @@ def get_model_data(df, config, scalers_x=None, scaler_y=None):
     return X_dict, new_scalers_x, scaler_y
 
 def plot_predictions(y_true, y_pred, y_std, model_name):
+    """Plots predicted standardized ratings vs actual standardized ratings with error bars. 
+    Red line indicates perfect predictions (congruence)."""
     plt.figure(figsize=(10, 7))
     plt.errorbar(y_true, y_pred, yerr=y_std, fmt='o', alpha=0.5, label='Preds (Mean ± SD)', capsize=3)
     
@@ -72,6 +74,7 @@ def plot_predictions(y_true, y_pred, y_std, model_name):
     print(f"Evaluation plot saved to {output_plot}")
 
 def run_evaluation(model_name, num_steps=2000, lr=0.01):
+    """General inference and evaluation loop for any model defined in MODEL_CONFIGS."""
     if model_name not in MODEL_CONFIGS:
         raise ValueError(f"Model '{model_name}' not configured in MODEL_CONFIGS.")
     

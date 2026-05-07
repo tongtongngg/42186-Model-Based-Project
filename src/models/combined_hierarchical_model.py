@@ -1,17 +1,10 @@
 import torch
 import pyro
 import pyro.distributions as dist
-from pyro.infer import Predictive
-import pandas as pd
-from src.data_utils import load_PL_dataset
-from src.data_utils.midfield_pre import load_midfielder_data
 
-def standardize(tensor):
-    if tensor.std() == 0:
-        return tensor - tensor.mean()
-    return (tensor - tensor.mean()) / tensor.std()
 
 def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalkeeper_data=None, defender_data=None):
+    """The manual combined hierarchical model, based on the indvidual models. Introduces shared hyperpriors for shared parameters."""
     if attacker_data is None: attacker_data = {}
     if midfielder_data is None: midfielder_data = {}
     if goalkeeper_data is None: goalkeeper_data = {}
@@ -22,6 +15,7 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     n_gk = goalkeeper_data.get('n', goalkeeper_data['saves'].shape[0] if 'saves' in goalkeeper_data else 1)
     n_def = defender_data.get('n', defender_data['touches'].shape[0] if 'touches' in defender_data else 1)
 
+    # hyperpriors for shared parameters
     mu_w_goals = pyro.sample("mu_w_goals", dist.Normal(0.0, 1.0))
     sigma_w_goals = pyro.sample("sigma_w_goals", dist.HalfNormal(1.0))
     mu_w_xA = pyro.sample("mu_w_xA", dist.Normal(0.0, 1.0))
@@ -32,6 +26,7 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     sigma_alpha_rating = pyro.sample("sigma_alpha_rating", dist.HalfNormal(1.0))
     mu_rating_sigma = pyro.sample("mu_rating_sigma", dist.LogNormal(0.0, 0.5))
 
+    # attacker priors / weights
     alpha_xa_att = pyro.sample("alpha_xa_att", dist.Normal(0, 1))
     beta_kp_xa_att = pyro.sample("beta_kp_xa_att", dist.Normal(0, 1))
     xa_sigma_att = pyro.sample("xa_sigma_att", dist.HalfNormal(1))
@@ -48,6 +43,7 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     w_sot_att = pyro.sample("w_sot_att", dist.Normal(0, 1))
     rating_sigma_att = pyro.sample("rating_sigma_att", dist.HalfNormal(mu_rating_sigma))
 
+    # midfielder priors / weights
     r_ohp_mf = pyro.sample("r_ohp_mf", dist.HalfNormal(10.0))
     r_shots_mf = pyro.sample("r_shots_mf", dist.HalfNormal(10.0))
     r_fouled_mf = pyro.sample("r_fouled_mf", dist.HalfNormal(10.0))
@@ -68,6 +64,7 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     w_goals_mf = pyro.sample("w_goals_mf", dist.Normal(mu_w_goals, sigma_w_goals))
     rating_sigma_mf = pyro.sample("rating_sigma_mf", dist.HalfNormal(mu_rating_sigma))
 
+    # goalkeeper priors / weights
     alpha_gp_gk = pyro.sample("alpha_gp_gk", dist.Normal(0, 1))
     beta_saves_gp_gk = pyro.sample("beta_saves_gp_gk", dist.Normal(0, 1))
     gp_sigma_gk = pyro.sample("gp_sigma_gk", dist.HalfNormal(1))
@@ -81,6 +78,7 @@ def combined_hierarchical_model(attacker_data=None, midfielder_data=None, goalke
     w_br_gk = pyro.sample("w_br_gk", dist.Normal(mu_w_br, sigma_w_br))
     rating_sigma_gk = pyro.sample("rating_sigma_gk", dist.HalfNormal(mu_rating_sigma))
 
+    # defender priors / weights
     touches_mu_def = pyro.sample("touches_mu_def", dist.Normal(0, 1))
     touches_sigma_def = pyro.sample("touches_sigma_def", dist.HalfNormal(1))
     totalDuelsWon_mu_def = pyro.sample("totalDuelsWon_mu_def", dist.Normal(0, 1))

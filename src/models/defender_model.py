@@ -2,14 +2,10 @@ import torch
 import pyro
 import pyro.distributions as dist
 from pyro.infer import Predictive, MCMC, NUTS
+
 from src.data_utils import load_PL_dataset
+from src.data_utils.helpers import standardize
 
-
-def standardize(tensor):
-    std = tensor.std()
-    if std == 0:
-        return tensor - tensor.mean()
-    return (tensor - tensor.mean()) / std
 
 
 def defender_model(
@@ -32,10 +28,9 @@ def defender_model(
 
     Notes:
     - continuous variables are standardized
-    - cleanSheet is binary 0/1 and modeled with Bernoulli
+    - cleanSheet is low count data and modelled as a poisson with log link, using original counts (not standardized).
     """
 
-    # Determine batch size
     n_obs = None
     for x in [touches, accuratePasses, totalDuelsWon, clearances, cleanSheet, rating]:
         if x is not None:
@@ -73,6 +68,7 @@ def defender_model(
     w_cleanSheet_to_rating = pyro.sample("w_cleanSheet_to_rating", dist.Normal(0, 1))
     rating_sigma = pyro.sample("rating_sigma", dist.HalfNormal(1))
 
+    # plate for independent observations.
     with pyro.plate("data", n_obs):
 
         touches_obs = pyro.sample(
@@ -155,61 +151,12 @@ if __name__ == "__main__":
         "rating": standardize(data["rating"]),
     }
 
-    print("--- Prior Predictive Check ---")
 
     prior_predictive = Predictive(
         defender_model,
         num_samples=100,
     )
-
     prior_samples = prior_predictive()
-
-    for name in [
-        "touches",
-        "accuratePasses",
-        "totalDuelsWon",
-        "clearances",
-        "cleanSheet",
-        "rating",
-    ]:
-        print(f"{name}: {prior_samples[name].shape}")
-        print(prior_samples[name].flatten()[:5])
-
-    print("\n--- Running NUTS Inference ---")
-
-    nuts_kernel = NUTS(defender_model)
-
-    mcmc = MCMC(
-        nuts_kernel,
-        num_samples=1000,
-        warmup_steps=500,
-        num_chains=1,
-    )
-
-    mcmc.run(
-        touches=model_data["touches"],
-        accuratePasses=model_data["accuratePasses"],
-        totalDuelsWon=model_data["totalDuelsWon"],
-        clearances=model_data["clearances"],
-        cleanSheet=model_data["cleanSheet"],
-        rating=model_data["rating"],
-    )
-
-    print("\n--- Posterior Summary ---")
-    mcmc.summary()
-
-    posterior_samples = mcmc.get_samples()
-
-    print("\nPosterior mean effects:")
-
-    for name in [
-        "w_touches_to_passes",
-        "w_duels_to_clearances",
-        "w_clearances_to_cleanSheet",
-        "w_touches_to_rating",
-        "w_passes_to_rating",
-        "w_cleanSheet_to_rating",
-    ]:
-        print(f"{name}: {posterior_samples[name].mean().item():.3f}")
-
-    print("\nDefender DAG model inference complete.")
+    print("Generated 1 sample of fake data from the priors:")
+    for k in ['touches', 'accuratePasses', 'totalDuelsWon', 'clearances', 'cleanSheet', 'rating']:
+        print(f"Sampled {k}: {prior_samples[k].flatten()[:5]}") 

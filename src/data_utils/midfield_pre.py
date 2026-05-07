@@ -8,6 +8,8 @@ from sklearn.feature_selection import mutual_info_regression
 from src.data_utils.load_dataset import load_PL_dataset
 from src.data_utils.correlation import get_correlations_by_position
 
+"""Midfielder-specific data loading, preprocessing and plots."""
+
 # Columns that only exist for goalkeepers — always NaN for outfield players
 GK_ONLY_COLS = [
 
@@ -131,7 +133,7 @@ def select_features_by_clustering(corr_dict: dict, df: pd.DataFrame, n_clusters:
         dropped_str = f", dropped {others}" if others else ""
         print(f"  Cluster {cluster_id}: kept '{best}' (r={corr_dict[best]:+.4f}){dropped_str}")
 
-    print(f"\n--- Recommended Features for Midfielder Model ---")
+    print(f"\n--- Selected Features for Midfielder Model ---")
     for f in selected:
         print(f"  {f:<45} r={corr_dict[f]:+.4f}")
 
@@ -167,8 +169,9 @@ if __name__ == "__main__":
 
     select_features_by_clustering(candidates, mf_df, n_clusters=7)
 
+    #Output from previous run:
     """"
-    --- Recommended Features for Midfielder Model ---
+    --- Selected Features for Midfielder Model ---
     goals                                         r=+0.6454
     aerialDuelsWon                                r=+0.5406
     accurateOppositionHalfPasses                  r=+0.7592
