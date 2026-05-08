@@ -83,7 +83,40 @@ def run_evaluation(model_name, num_steps=2000, lr=0.01):
     
     df = load_PL_dataset()
 
-    if config.get("is_combined_all"):
+    if config.get("is_hierarchical"):
+        from src.models.hierarchical_ard_model import get_hierarchical_data, POSITIONS
+        from sklearn.model_selection import train_test_split as _tts
+
+        all_df = df[df['position'].isin(POSITIONS)].dropna(subset=['rating']).copy()
+        train_df, test_df = _tts(all_df, test_size=0.2, random_state=42, stratify=all_df['position'])
+
+        train_data, scalers_x, scaler_y = get_hierarchical_data(train_df)
+        test_data,  _,        _         = get_hierarchical_data(test_df, scalers_x=scalers_x, scaler_y=scaler_y)
+
+        pyro.clear_param_store()
+        guide = AutoNormal(model_fn)
+        svi   = SVI(model_fn, guide, Adam({"lr": lr}), loss=Trace_ELBO())
+
+        for step in range(num_steps):
+            loss = svi.step(**train_data)
+            if step % 500 == 0: print(f"Step {step:4d} : Loss = {loss:.4f}")
+
+        predict_data = {k: v for k, v in test_data.items() if k != "rating"}
+        predictive   = Predictive(model_fn, guide=guide, num_samples=500)
+        samples      = predictive(**predict_data)
+
+        y_pred = samples["rating"].mean(0).detach().numpy()
+        y_std  = samples["rating"].std(0).detach().numpy()
+        y_true = test_data["rating"].detach().numpy()
+
+        mse = mean_squared_error(y_true, y_pred)
+        mae = mean_absolute_error(y_true, y_pred)
+        r2  = r2_score(y_true, y_pred)
+
+        print(f"\n==============================\n      {model_name.upper()} PERFORMANCE\n==============================\nMSE: {mse:.4f}\nMAE: {mae:.4f}\nR2 : {r2:.4f}\n==============================")
+        plot_predictions(y_true, y_pred, y_std, model_name)
+
+    elif config.get("is_combined_all"):
         train_data = {}
         test_data_full = {}
         scalers = {}
@@ -170,7 +203,7 @@ def run_evaluation(model_name, num_steps=2000, lr=0.01):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate performance of MBML models.")
-    parser.add_argument("model", choices=list(MODEL_CONFIGS.keys()), help="Name of the model to evaluate.")
+    parser.add_argument("model", choices=sorted(MODEL_CONFIGS.keys()), help="Name of the model to evaluate.")
     parser.add_argument("--steps", type=int, default=2000, help="Number of SVI steps.")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate.")
     args = parser.parse_args()

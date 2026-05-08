@@ -4,6 +4,7 @@ from src.models.goalkeeper_model import goalkeeper_model as goalkeeper_model_fn
 from src.models.midfield_model import midfielder_model as midfielder_model_fn
 from src.models.defender_model import defender_model as defender_model_fn
 from src.models.combined_hierarchical_model import combined_hierarchical_model
+from src.models.hierarchical_ard_model import hierarchical_model as hierarchical_model_fn
 
 """This file contains configurations for models, as we wrote them individually. 
 It standardizes for evaluate_performance.py, such that it can easily be called from the command-line for all models."""
@@ -49,6 +50,11 @@ def combined_all_wrapper(attacker_data=None, midfielder_data=None, goalkeeper_da
     )
 
 MODEL_CONFIGS = {
+    "hierarchical": {
+        "model_fn": hierarchical_model_fn,
+        "is_hierarchical": True,
+        "target": "rating",
+    },
     "attacker": {
         "model_fn": attacker_model_fn,
         "features": ['groundDuelsWon', 'ballRecovery', 'keyPasses', 'expectedAssists', 'totalShots', 'shotsOnTarget', 'goals'],
